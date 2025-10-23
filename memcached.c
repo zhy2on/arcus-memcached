@@ -9306,7 +9306,7 @@ static void process_config_zkfailstop_command(conn *c, token_t *tokens, const si
         sprintf(buf, "zkfailstop %s\r\nEND", arcus_zk_get_failstop() ? "on" : "off");
         out_string(c, buf);
     } else if (ntokens == 4) {
-        const char *config = tokens[COMMAND_TOKEN+2].value;
+        const char *config = tokens[SUBCOMMAND_TOKEN+1].value;
         bool zkfailstop;
         if (strcmp(config, "on") == 0)
             zkfailstop = true;
@@ -9711,7 +9711,7 @@ static void process_config_auth_command(conn *c, token_t *tokens, const size_t n
         sprintf(buf, "auth %s\r\nEND", settings.require_sasl ? "on" : "off");
         out_string(c, buf);
     } else if (ntokens == 4) {
-        const char *config = tokens[COMMAND_TOKEN+2].value;
+        const char *config = tokens[SUBCOMMAND_TOKEN+1].value;
         if (strcmp(config, "on") == 0) {
             pthread_t tid;
             int ret = pthread_create(&tid, NULL, init_sasl_thread, NULL);
