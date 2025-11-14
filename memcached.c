@@ -15854,7 +15854,7 @@ int main (int argc, char **argv)
     int c;
     bool lock_memory = false;
     bool do_daemonize = false;
-    //bool preallocate = false;
+    bool preallocate = false;
     int maxcore = 0;
     char *username = NULL;
     char *pid_file = NULL;
@@ -15962,12 +15962,9 @@ int main (int argc, char **argv)
                     "The value of memory limit must be greater than 0.\n");
                 return 1;
             }
-            old_opts += sprintf(old_opts, "cache_size=%llu;",
-                                 (unsigned long long)settings.maxbytes);
             break;
         case 'M':
             settings.evict_to_free = 0;
-            old_opts += sprintf(old_opts, "eviction=false;");
             break;
 #ifdef ENABLE_STICKY_ITEM
         case 'g':
@@ -15978,8 +15975,6 @@ int main (int argc, char **argv)
                     "The value of sticky(gummed) memory limit must be greater than 0.\n");
                 return 1;
             }
-            old_opts += sprintf(old_opts, "sticky_limit=%llu;",
-                                (unsigned long long)settings.sticky_limit);
             break;
 #endif
         case 'c':
@@ -16028,7 +16023,6 @@ int main (int argc, char **argv)
                         "Factor must be greater than 1\n");
                 return 1;
             }
-             old_opts += sprintf(old_opts, "factor=%f;", settings.factor);
            break;
         case 'n':
             settings.chunk_size = atoi(optarg);
@@ -16037,7 +16031,6 @@ int main (int argc, char **argv)
                         "Chunk size must be greater than 0\n");
                 return 1;
             }
-            old_opts += sprintf(old_opts, "chunk_size=%d;", settings.chunk_size);
             break;
         case 't':
             settings.num_threads = atoi(optarg);
@@ -16060,18 +16053,15 @@ int main (int argc, char **argv)
             break;
         case 'D':
             settings.prefix_delimiter = optarg[0];
-            old_opts += sprintf(old_opts, "prefix_delimiter=%c;", settings.prefix_delimiter);
             settings.detail_enabled = 1;
             break;
         case 'L' :
             if (enable_large_pages() == 0) {
-                //preallocate = true;
-                old_opts += sprintf(old_opts, "preallocate=true;");
+                preallocate = true;
             }
             break;
         case 'C' :
             settings.use_cas = false;
-            old_opts += sprintf(old_opts, "use_cas=false;");
             break;
         case 'b' :
             settings.backlog = atoi(optarg);
@@ -16124,8 +16114,6 @@ int main (int argc, char **argv)
                     " and will decrease your memory efficiency.\n"
                 );
             }
-            old_opts += sprintf(old_opts, "item_size_max=%llu;", (unsigned long long)
-                                settings.item_size_max);
             break;
         case 'E':
             engine = optarg;
@@ -16182,8 +16170,34 @@ int main (int argc, char **argv)
             return 1;
         }
     }
-
     old_opts += sprintf(old_opts, "num_threads=%lu;", (unsigned long)settings.num_threads);
+    old_opts += sprintf(old_opts, "cache_size=%llu;", (unsigned long long)settings.maxbytes);
+    if (settings.evict_to_free == 0) {
+        old_opts += sprintf(old_opts, "eviction=false;");
+    }
+    if (settings.sticky_limit > 0) {
+        old_opts += sprintf(old_opts, "sticky_limit=%llu;",
+                            (unsigned long long)settings.sticky_limit);
+    }
+    if (settings.factor != 1.25) {
+        old_opts += sprintf(old_opts, "factor=%f;", settings.factor);
+    }
+    if (settings.chunk_size != 48) {
+        old_opts += sprintf(old_opts, "chunk_size=%d;", settings.chunk_size);
+    }
+    if (settings.prefix_delimiter != ':') {
+        old_opts += sprintf(old_opts, "prefix_delimiter=%c;", settings.prefix_delimiter);
+    }
+    if (preallocate) {
+        old_opts += sprintf(old_opts, "preallocate=true;");
+    }
+    if (settings.use_cas == false) {
+        old_opts += sprintf(old_opts, "use_cas=false;");
+    }
+    if (settings.item_size_max != (1024 * 1024)) {
+        old_opts += sprintf(old_opts, "item_size_max=%llu;",
+                            (unsigned long long)settings.item_size_max);
+    }
     if (settings.verbose) {
         old_opts += sprintf(old_opts, "verbose=%lu;", (unsigned long)settings.verbose);
     }
