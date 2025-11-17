@@ -1,4 +1,4 @@
-# ARCUS Telnet Interface
+# 부록 A. ARCUS Telnet Interface
 
 ARCUS cache server의 동작을 간단히 확인하는 방법으로, telnet interface를 이용할 수 있다.
 

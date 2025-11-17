@@ -1,4 +1,4 @@
-# ARCUS Cache Server ASCII Protocol
+# 문서 소개
 
 ARCUS Cache Server가 제공하는 명령들의 ASCII Protocol을 기술한다.
 Binary protocol은 현재 지원하지 않으므로, 논의에서 제외한다.
@@ -22,51 +22,51 @@ Basic Concepts
 --------------
 
 ARCUS Cache Server를 사용함에 있어 필요한 cache key, item, slab 등의 기본 용어와 개념은
-[ARCUS 기본 개념](ch01-arcus-basic-concept.md)에서 설명하므로, 이를 먼저 읽어보길 권한다.
+[1. ARCUS 기본 개념](ch01-arcus-basic-concept.md)에서 설명하므로, 이를 먼저 읽어보길 권한다.
 
 ARCUS Cache Server가 제공하는 collection과 element 구조, b+tree key, element flag 등의
-중요 요소들은 [Collection 기본 개념](ch02-collection-items.md)에서 소개한다.
+중요 요소들은 [2. Collection 기본 개념](ch02-collection-items.md)에서 소개한다.
 
 Collection 기능을 제공함에 따라 item 속성들이 확장되었으며,
-이들은 [Item 속성 설명](ch03-item-attributes.md)에서 자세히 다룬다.
+이들은 [3. Item 속성 설명](ch03-item-attributes.md)에서 자세히 다룬다.
 
 Simple Key-Value 기능
 ---------------------
 
 ARCUS Cache Server는 memcached 1.4 기준의 key-value 명령을 그대로 제공하며, 일부에 대해 확장된 명령을 제공한다.
 따라서, 기존 memcached 1.4에서 사용한 명령들은 ARCUS Cache Server에서도 그대로 사용 가능하다.
-[Key-Value 명령](ch04-command-key-value.md)에서 key-value 유형의 item에 대해 수행가능한 명령들을 소개한다.
+[4. Key-Value 명령](ch04-command-key-value.md)에서 key-value 유형의 item에 대해 수행가능한 명령들을 소개한다.
 
 Collection 기능
 ---------------
 
 Collection 명령의 자세한 설명은 아래를 참고 바랍니다.
 
-- [List collection 명령](ch05-command-list-collection.md)
-- [Set collection 명령](ch06-command-set-collection.md)
-- [Map collection 명령](ch07-command-map-collection.md)
-- [B+tree collection 명령](ch08-command-btree-collection.md)
+- [5. List 명령](ch05-command-list-collection.md)
+- [6. Set 명령](ch06-command-set-collection.md)
+- [7. Map 명령](ch07-command-map-collection.md)
+- [8. B+Tree 명령](ch08-command-btree-collection.md)
 
 Collection 일부 명령들은 command pipelining 처리가 가능하며,
-[Command Pipelining 기능](ch09-command-pipelining.md)에서 설명한다.
+[9. Command Pipelining 기능](ch09-command-pipelining.md)에서 설명한다.
 
 Item Attributes 기능
 --------------------
 
 Collection 지원으로 인해 item 유형이 다양해 졌으며, 다양한 item 유형에 따라 item attributes도 확장되었다.
-Item attributes를 조회하거나 변경하기 위하여 [Item Attribute 명령](ch10-command-item-attribute.md)을 제공한다.
+Item attributes를 조회하거나 변경하기 위하여 [10. Item Attribute 명령](ch10-command-item-attribute.md)을 제공한다.
 
 Scan 기능
 --------------------
 
-조건에 맞는 item 혹은 prefix 목록을 가져오는 기능으로 [Scan 명령](ch11-command-scan.md)을 제공한다.
+조건에 맞는 item 혹은 prefix 목록을 가져오는 기능으로 [11. Scan 명령](ch11-command-scan.md)을 제공한다.
 
 SASL Authentication 기능
 -----------------------
 
-ARCUS Cache Server의 인증/권한 관리 기능들은 [SASL 명령](ch12-command-sasl.md)으로 제공한다.
+ARCUS Cache Server의 인증/권한 관리 기능들은 [12. SASL 명령](ch12-command-sasl.md)으로 제공한다.
 
 Admin & Monitoring 기능
 -----------------------
 
-ARCUS Cache Server의 운영 상에 필요한 기능들은 [Admin & Monitoring 명령](ch13-command-administration.md)으로 제공한다.
+ARCUS Cache Server의 운영 상에 필요한 기능들은 [13. Admin & Monitoring 명령](ch13-command-administration.md)으로 제공한다.

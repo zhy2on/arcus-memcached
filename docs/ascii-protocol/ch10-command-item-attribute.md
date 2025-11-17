@@ -1,4 +1,4 @@
-# Chapter 10. Item Attribute 명령
+# 10. Item Attribute 명령
 
 Item attributes를 조회하는 getattr 명령과 변경하는 setattr 명령을 소개한다.
 
@@ -6,7 +6,7 @@ ARCUS에서 어떤 item attributes를 제공하는 지를 알고자 한다면,
 [Item Attibute 설명](ch03-item-attributes.md)을 참고 바란다.
 
 
-## getattr (Item Attribute 조회)
+## getattr 명령
 
 Item attributes를 조회하는 getattr 명령은 아래와 같다.
 
@@ -37,7 +37,7 @@ END\r\n
 | "CLIENT_ERROR bad command line format"  | protocol syntax 틀림
 
 
-## setattr (Item Attribute 변경)
+## setattr 명령
 
 Item attributes를 변경하는 setattr 명령은 아래와 같다.
 모든 attributes에 대해 조회가 가능하지만, 변경은 일부 attributes에 대해서만 가능하다.

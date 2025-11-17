@@ -1,18 +1,18 @@
-# Chapter 6. SET 명령
+# 6. SET 명령
 
 Set collection에 관한 명령은 아래와 같다.
 
-- [Set collection 생성: sop create](#sop-create)
+- [Set collection 생성: sop create](#sop-create 명령)
 - Set collection 삭제: delete (기존 key-value item의 삭제 명령을 그대로 사용)
 
 Set element에 관한 명령은 아래와 같다.
 
-- [Set element 삽입: sop insert](#sop-insert)
-- [Set element 삭제: sop delete](#sop-delete)
-- [Set element 조회: sop get](#sop-get)
-- [Set element 존재유무 검사: sop exist](#sop-exist)
+- [Set element 삽입: sop insert](#sop-insert 명령)
+- [Set element 삭제: sop delete](#sop-delete 명령)
+- [Set element 조회: sop get](#sop-get 명령)
+- [Set element 존재유무 검사: sop exist](#sop-exist 명령)
 
-## sop create
+## sop create 명령
 
 Set collection을 empty 상태로 생성한다.
 
@@ -36,7 +36,7 @@ Response string과 그 의미는 아래와 같다.
 | "CLIENT_ERROR bad command line format"   | protocol syntax 틀림
 | "SERVER_ERROR out of memory"             | 메모리 부족
 
-## sop insert
+## sop insert 명령
 
 Set collection에 하나의 element를 삽입한다.
 Set collection을 생성하면서 하나의 element를 삽입할 수도 있다.
@@ -71,7 +71,7 @@ Response string과 그 의미는 아래와 같다.
 | "CLIENT_ERROR bad data chunk"            | 삽입할 데이터 길이가 \<bytes\>와 다르거나 "\r\n"으로 끝나지 않음
 | "SERVER_ERROR out of memory"             | 메모리 부족
 
-## sop delete
+## sop delete 명령
 
 Set collection에서 하나의 element를 삭제한다.
 
@@ -100,7 +100,7 @@ Response string과 그 의미는 아래와 같다.
 | "CLIENT_ERROR too large value"          | 삭제할 데이터가 element value의 최대 크기보다 큼
 | "CLIENT_ERROR bad data chunk"           | 삭제할 데이터의 길이가 \<bytes\>와 다르거나 "\r\n"으로 끝나지 않음
 
-## sop get
+## sop get 명령
 
 Set collection에서 N 개의 elements를 조회한다.
 
@@ -145,7 +145,7 @@ END|DELETED|DELETED_DROPPED\r\n
 | "CLIENT_ERROR bad command line format"               | protocol syntax 틀림
 | "SERVER_ERROR out of memory [writing get response]"  | 메모리 부족
 
-## sop exist
+## sop exist 명령
 
 Set collection에 특정 element의 존재 유무를 검사한다.
 

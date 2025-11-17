@@ -1,4 +1,4 @@
-# Chapter 2. Collection Concept
+# 2. Collection 기본 개념
 
 ## Collection 구조와 특징
 
