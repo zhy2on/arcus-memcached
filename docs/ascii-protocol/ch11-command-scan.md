@@ -1,7 +1,7 @@
 # 11. Scan 명령
 
-- [SCAN KEY 명령](#scan-key 명령)
-- [SCAN PREFIX 명령](#scan-prefix 명령)
+- [SCAN KEY 명령](#scan-key-명령)
+- [SCAN PREFIX 명령](#scan-prefix-명령)
 
 ## Scan key 명령
 

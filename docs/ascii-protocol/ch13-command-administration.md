@@ -1,16 +1,16 @@
 # 13. Admin & Monitoring 명령
 
-- [FLUSH 명령](#flush 명령)
-- [SCRUB 명령](#scrub 명령)
-- [STATS 명령](#stats 명령)
-- [CONFIG 명령](#config 명령)
-- [CMDLOG 명령](#command-logging 명령)
-- [LQDETECT 명령](#long-query-detect 명령)
-- [KEY DUMP 명령](#key-dump 명령)
-- [ZKENSEMBLE 명령](#zkensemble 명령)
-- [HELP 명령](#help 명령)
-- [SHUTODWN 명령](#shutdown 명령)
-- [RELOAD 명령](#reload 명령)
+- [FLUSH 명령](#flush-명령)
+- [SCRUB 명령](#scrub-명령)
+- [STATS 명령](#stats-명령)
+- [CONFIG 명령](#config-명령)
+- [CMDLOG 명령](#command-logging-명령)
+- [LQDETECT 명령](#long-query-detect-명령)
+- [KEY DUMP 명령](#key-dump-명령)
+- [ZKENSEMBLE 명령](#zkensemble-명령)
+- [HELP 명령](#help-명령)
+- [SHUTODWN 명령](#shutdown-명령)
+- [RELOAD 명령](#reload-명령)
 
 ## Flush 명령
 

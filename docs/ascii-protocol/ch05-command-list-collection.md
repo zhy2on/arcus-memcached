@@ -2,14 +2,14 @@
 
 List collection에 관한 명령은 아래와 같다.
 
-- [List collection 생성: lop create](#lop-create 명령)
+- [List collection 생성: lop create](#lop-create-명령)
 - List collection 삭제: delete (기존 key-value item의 삭제 명령을 그대로 사용)
 
 List element에 관한 명령은 아래와 같다.
 
-- [List element 삽입: lop insert](#lop-insert 명령)
-- [List element 삭제: lop delete](#lop-delete 명령)
-- [List element 조회: lop get](#lop-get 명령)
+- [List element 삽입: lop insert](#lop-insert-명령)
+- [List element 삭제: lop delete](#lop-delete-명령)
+- [List element 조회: lop get](#lop-get-명령)
 
 ## lop create 명령
 
