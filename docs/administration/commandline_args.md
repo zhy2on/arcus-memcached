@@ -1,4 +1,7 @@
-# command line args
+# ARCUS 서버의 구동 옵션
+
+`arcus-memcached` 서버의 구동 옵션을 설명한다.
+
 ## 필수 옵션
 
 | 옵션 | 설명 | 기타|
