@@ -7,9 +7,9 @@ List collection에 관한 명령은 아래와 같다.
 
 List element에 관한 명령은 아래와 같다.
 
-- [List element 삽입: lop insert](#lop-insert-명령)
-- [List element 삭제: lop delete](#lop-delete-명령)
-- [List element 조회: lop get](#lop-get-명령)
+- [List element 삽입: lop insert](#lop-insert)
+- [List element 삭제: lop delete](#lop-delete)
+- [List element 조회: lop get](#lop-get)
 
 <a id="lop-create"></a>
 ## lop create 명령
@@ -36,6 +36,7 @@ Response string과 그 의미는 아래와 같다.
 | "CLIENT_ERROR bad command line format" | protocol syntax 틀림
 | "SERVER_ERROR out of memory"           | 메모리 부족
 
+<a id="lop-insert"></a>
 ## lop insert 명령
 
 List collection에 하나의 element를 삽입한다.
@@ -75,6 +76,7 @@ Response string과 그 의미는 아래와 같다.
 | "CLIENT_ERROR bad data chunk"            | 삽입할 데이터 길이가 \<bytes\>와 다르거나 "\r\n"으로 끝나지 않음
 | "SERVER_ERROR out of memory"             | 메모리 부족
 
+<a id="lop-delete"></a>
 ## lop delete 명령
 
 List collection에 하나의 index 또는 index range에 해당하는 elements를 삭제한다.
@@ -108,6 +110,7 @@ Response string과 그 의미는 아래와 같다.
 | "NOT_SUPPORTED"                          | 지원하지 않음
 | "CLIENT_ERROR bad command line format"   | protocol syntax 틀림
 
+<a id="lop-get"></a>
 ## lop get 명령
 
 List collection에 하나의 index 또는 index range에 해당하는 elements를 조회한다.
