@@ -31,9 +31,10 @@ SCRAM-SHA-256 인증은 다음과 같이 이루어진다.
 
 SASL 인증에 관한 명령은 아래와 같다.
 
-- [sasl mech](#sasl-mech)
-- [sasl auth](#sasl-auth)
+- [sasl mech 명령](#sasl-mech)
+- [sasl auth 명령](#sasl-auth)
 
+<a id="sasl-mech"></a>
 ## sasl mech 명령
 
 캐시 서버에서 지원하는 인증방식 목록을 조회한다.
@@ -55,6 +56,7 @@ SASL_MECH SCRAM-SHA-256\r\n
 | "ERROR unknown command" | SASL 인증 기능이 없는 캐시 서버 |
 | "CLIENT_ERROR bad command line format" | protocol syntax 틀림 |
 
+<a id="sasl-auth"></a>
 ## sasl auth 명령
 
 주어진 인증 방식에 따라 인증 과정을 수행한다. 인증 방식 인자의 포함 여부에 따라 새로운 인증 과정 시작(start)인지, 이전 인증 요청을 이어서 수행(step)하는 것인지 구분한다.
