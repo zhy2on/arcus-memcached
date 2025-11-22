@@ -6,6 +6,7 @@ ARCUS에서 어떤 item attributes를 제공하는 지를 알고자 한다면,
 [Item Attibute 설명](ch03-item-attributes.md)을 참고 바란다.
 
 
+<a id="getattr"></a>
 ## getattr 명령
 
 Item attributes를 조회하는 getattr 명령은 아래와 같다.
@@ -37,6 +38,7 @@ END\r\n
 | "CLIENT_ERROR bad command line format"  | protocol syntax 틀림
 
 
+<a id="setattr"></a>
 ## setattr 명령
 
 Item attributes를 변경하는 setattr 명령은 아래와 같다.
