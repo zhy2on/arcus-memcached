@@ -164,7 +164,7 @@ bop delete <key> <bkey or "bkey range"> [<eflag_filter>] [<count>] [drop] [norep
 
 - \<key\> - 대상 item의 key string
 - \<bkey or "bkey range"\> - 하나의 bkey 또는 bkey range 조회 조건.
-Bkey range는 "bkey1..bkey2" 형식으로 표현한다.
+   - Bkey range는 "bkey1..bkey2" 형식으로 표현한다.
 - \<eflag_filter\> - eflag filter 조건.
 [Collection 기본 개념](ch02-collection-items.md)에서 eflag filter 참조 바란다.
 - \<count\> - 삭제할 elements 개수 지정
@@ -197,7 +197,8 @@ bop get <key> <bkey or "bkey range"> [<eflag_filter>] [[<offset>] <count>] [dele
 ```
 
 - \<key\> - 대상 item의 key string
-- \<bkey or "bkey range"\> - 하나의 bkey 또는 bkey range 조회 조건. Bkey range는 "bkey1..bkey2" 형식으로 표현한다.
+- \<bkey or "bkey range"\> - 하나의 bkey 또는 bkey range 조회 조건.
+   - Bkey range는 "bkey1..bkey2" 형식으로 표현한다.
 - \<eflag_filter\> - eflag filter 조건. [Collection 기본 개념](ch02-collection-items.md)에서 eflag filter 참조 바란다.
 - [\<offset\>] \<count\> - 조회 조건을 만족하는 elements에서 skip 개수와 실제 조회할 개수
 - delete or drop - element 조회하면서 그 element를 delete할 것인지
@@ -258,7 +259,7 @@ bop count <key> <bkey or "bkey range"> [<eflag_filter>]\r\n
 
 - \<key\> - 대상 item의 key string
 - \<bkey or "bkey range"\> - 하나의 bkey 또는 bkey range 조회 조건.
-Bkey range는 "bkey1..bkey2" 형식으로 표현한다.
+  - Bkey range는 "bkey1..bkey2" 형식으로 표현한다.
 - \<eflag_filter\> - eflag filter 조건.
 [Collection 기본 개념](ch02-collection-items.md)에서 eflag filter 참조 바란다.
 
@@ -335,12 +336,13 @@ bop mget <lenkeys> <numkeys> <bkey or "bkey range"> [<eflag_filter>] [<offset>] 
 * <eflag_filter> : <offset> [<bitwop> <bitwvalue>] <compop> <compvalue>
 ```
 
-- \<"space separated keys"\> - 대상 b+tree들의 key list로, 스페이스(' ')로 구분한다.
-     - 하위 호환성(1.10.X 이하 버전)을 위해 콤마(,)도 지원하지만 권장하지 않는다.
-- \<lenkeys\>과 \<numkeys> - key list 문자열의 길이와 key 개수를 나타낸다.
-- \<bkey or "bkey range"\> - 하나의 bkey 또는 bkey range 조회 조건. Bkey range는 "bkey1..bkey2" 형식으로 표현한다.
+- \<lenkeys\>과 \<numkeys> - key list 문자열 길이와 key 개수를 나타낸다.
+- \<bkey or "bkey range"\> - 하나의 bkey 또는 bkey range 조회 조건.
+   - Bkey range는 "bkey1..bkey2" 형식으로 표현한다.
 - \<eflag_filter\> - eflag filter 조건. [Collection 기본 개념](ch02-collection-items.md)에서 eflag filter 참조 바란다.
 - [\<offset\>] \<count\> - 조회 조건을 만족하는 elements에서 skip 개수와 실제 조회할 개수
+- \<"space separated keys"\> - 대상 b+tree들의 key list로, 스페이스(' ')로 구분한다.
+     - 하위 호환성(1.10.X 이하 버전)을 위해 콤마(,)도 지원하지만 권장하지 않는다.
 
 bop mget 명령은 O(small N) 수행 원칙을 위하여 다음의 제약 사항을 가진다.
 - key list에 지정 가능한 최대 key 수는 200이다.
@@ -422,15 +424,15 @@ bop smget <lenkeys> <numkeys> <bkey or "bkey range"> [<eflag_filter>] <count> du
 * <eflag_filter> : <offset> [<bitwop> <bitwvalue>] <compop> <compvalue>
 ```
 
-- \<"space separated keys"\> - 대상 b+tree들의 key list로, 스페이스(' ')로 구분한다.
-     - 하위 호환성(1.10.X 이하 버전)을 위해 콤마(,)도 지원하지만 권장하지 않는다.
-- \<lenkeys\>과 \<numkeys> - key list 문자열의 길이와 key 개수를 나타낸다.
+- \<lenkeys\>과 \<numkeys> - key list 문자열 길이와 key 개수를 나타낸다.
 - \<bkey or "bkey range"\> - 하나의 bkey 또는 bkey range 조회 조건.
-Bkey range는 "bkey1..bkey2" 형식으로 표현한다.
+   - Bkey range는 "bkey1..bkey2" 형식으로 표현한다.
 - \<eflag_filter\> - eflag filter 조건.
-[Collection 기본 개념](ch02-collection-items.md)에서 eflag filter 참조 바란다.
+   [Collection 기본 개념](ch02-collection-items.md)에서 eflag filter 참조 바란다.
 - \<count\> - 조회할 element 개수
 - `duplicate|unique` - duplicate는 중복 bkey를 허용하고, unique는 중복 bkey를 제거한다.
+- \<"space separated keys"\> - 대상 b+tree들의 key list로, 스페이스(' ')로 구분한다.
+     - 하위 호환성(1.10.X 이하 버전)을 위해 콤마(,)도 지원하지만 권장하지 않는다.
 
 bop smget 명령은 O(small N) 수행 원칙을 위하여 다음의 제약 사항을 가진다.
 - key list에 지정 가능한 최대 key 수는 10000이다.
