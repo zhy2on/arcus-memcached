@@ -8810,10 +8810,11 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
 {
     assert(c != NULL);
 
-    token_t *key_token = &tokens[KEY_TOKEN];
     ENGINE_ERROR_CODE ret = ENGINE_SUCCESS;
+    token_t *key_token;
     int64_t exptime = 0;
 
+    key_token = &tokens[KEY_TOKEN];
     if (should_touch) {
         // For get and touch commands, use first token as exptime
         if (!safe_strtoll(tokens[1].value, &exptime)) {
@@ -8956,13 +8957,20 @@ static void process_update_command(conn *c, token_t *tokens, const size_t ntoken
                                    ENGINE_STORE_OPERATION store_op, bool handle_cas)
 {
     assert(c != NULL);
-    char *key = tokens[KEY_TOKEN].value;
-    size_t nkey = tokens[KEY_TOKEN].length;
+    char *key;
+    size_t nkey;
     unsigned int flags;
     int64_t exptime=0;
     int vlen;
     uint64_t req_cas_id=0;
     item *it;
+
+    nkey = tokens[KEY_TOKEN].length;
+    if (nkey > KEY_MAX_LENGTH) {
+        out_string(c, "CLIENT_ERROR bad command line format");
+        return;
+    }
+    key = tokens[KEY_TOKEN].value;
 
 #ifdef SASL_ENABLED
     if (settings.require_sasl && !check_ascii_auth(c, AUTHZ_KV, key, tokens, ntokens)) {
@@ -8972,11 +8980,6 @@ static void process_update_command(conn *c, token_t *tokens, const size_t ntoken
 #endif
 
     set_noreply_maybe(c, tokens, ntokens);
-
-    if (nkey > KEY_MAX_LENGTH) {
-        out_string(c, "CLIENT_ERROR bad command line format");
-        return;
-    }
 
     if ((! safe_strtoul(tokens[2].value, (uint32_t *)&flags)) ||
         (! safe_strtoll(tokens[3].value, &exptime)) ||
@@ -9057,8 +9060,15 @@ static void process_arithmetic_command(conn *c, token_t *tokens, const size_t nt
     assert(c != NULL);
     assert(c->ewouldblock == false);
     uint64_t delta;
-    char *key = tokens[KEY_TOKEN].value;
-    size_t nkey = tokens[KEY_TOKEN].length;
+    char *key;
+    size_t nkey;
+
+    nkey = tokens[KEY_TOKEN].length;
+    if (nkey > KEY_MAX_LENGTH) {
+        out_string(c, "CLIENT_ERROR bad command line format");
+        return;
+    }
+    key = tokens[KEY_TOKEN].value;
 
 #ifdef SASL_ENABLED
     if (settings.require_sasl && !check_ascii_auth(c, AUTHZ_KV, key, tokens, ntokens)) {
@@ -9069,10 +9079,6 @@ static void process_arithmetic_command(conn *c, token_t *tokens, const size_t nt
 
     set_noreply_maybe(c, tokens, ntokens);
 
-    if (nkey > KEY_MAX_LENGTH) {
-        out_string(c, "CLIENT_ERROR bad command line format");
-        return;
-    }
     if (!safe_strtoull(tokens[2].value, &delta)) {
         out_string(c, "CLIENT_ERROR invalid numeric delta argument");
         return;
@@ -9152,8 +9158,15 @@ static void process_arithmetic_command(conn *c, token_t *tokens, const size_t nt
 static void process_delete_command(conn *c, token_t *tokens, const size_t ntokens)
 {
     assert(c->ewouldblock == false);
-    char *key = tokens[KEY_TOKEN].value;
-    size_t nkey = tokens[KEY_TOKEN].length;
+    char *key;
+    size_t nkey;
+
+    nkey = tokens[KEY_TOKEN].length;
+    if (nkey > KEY_MAX_LENGTH) {
+        out_string(c, "CLIENT_ERROR bad command line format");
+        return;
+    }
+    key = tokens[KEY_TOKEN].value;
 
 #ifdef SASL_ENABLED
     if (settings.require_sasl && !check_ascii_auth(c, AUTHZ_DELETE, key, tokens, ntokens)) {
@@ -9179,13 +9192,7 @@ static void process_delete_command(conn *c, token_t *tokens, const size_t ntoken
         }
     }
 
-    if (nkey > KEY_MAX_LENGTH) {
-        out_string(c, "CLIENT_ERROR bad command line format");
-        return;
-    }
-
-    ENGINE_ERROR_CODE ret;
-    ret = mc_engine.v1->remove(mc_engine.v0, c, key, nkey, 0, 0);
+    ENGINE_ERROR_CODE ret = mc_engine.v1->remove(mc_engine.v0, c, key, nkey, 0, 0);
     CONN_CHECK_AND_SET_EWOULDBLOCK(ret, c);
     if (settings.detail_enabled) {
         stats_prefix_record_delete(key, nkey);
@@ -9768,7 +9775,7 @@ static void process_config_auth_command(conn *c, token_t *tokens, const size_t n
 
 static void process_config_command(conn *c, token_t *tokens, const size_t ntokens)
 {
-    char *config_key = tokens[SUBCOMMAND_TOKEN].value;
+    char *config_key;
 
 #ifdef SASL_ENABLED
     if (settings.require_sasl && !check_ascii_auth(c, AUTHZ_ADMIN, NULL, tokens, ntokens)) {
@@ -9782,6 +9789,8 @@ static void process_config_command(conn *c, token_t *tokens, const size_t ntoken
         out_string(c, "CLIENT_ERROR bad command line format");
         return;
     }
+
+    config_key = tokens[SUBCOMMAND_TOKEN].value;
 
     if (strcmp(config_key, "maxconns") == 0) {
         process_config_maxconns_command(c, tokens, ntokens);
@@ -9854,7 +9863,12 @@ static void process_config_command(conn *c, token_t *tokens, const size_t ntoken
 #ifdef ENABLE_ZK_INTEGRATION
 static void process_zkensemble_command(conn *c, token_t *tokens, const size_t ntokens)
 {
-    char *subcommand = tokens[SUBCOMMAND_TOKEN].value;
+    char *subcommand;
+
+    if (!arcus_zk_initalized()) {
+        out_string(c, "ERROR not using ZooKeeper");
+        return;
+    }
 
 #ifdef SASL_ENABLED
     if (settings.require_sasl && !check_ascii_auth(c, AUTHZ_ADMIN, NULL, tokens, ntokens)) {
@@ -9863,10 +9877,7 @@ static void process_zkensemble_command(conn *c, token_t *tokens, const size_t nt
     }
 #endif
 
-    if (!arcus_zk_initalized()) {
-        out_string(c, "ERROR not using ZooKeeper");
-        return;
-    }
+    subcommand = tokens[SUBCOMMAND_TOKEN].value;
 
     if (strcmp(subcommand, "get") == 0) {
         char buf[1024];
@@ -9910,7 +9921,7 @@ static void process_zkensemble_command(conn *c, token_t *tokens, const size_t nt
 
 static void process_dump_command(conn *c, token_t *tokens, const size_t ntokens)
 {
-    char *subcommand = tokens[SUBCOMMAND_TOKEN].value;
+    char *subcommand;
     char *modestr;
     char *filepath;
     char *prefix = NULL;
@@ -9922,6 +9933,8 @@ static void process_dump_command(conn *c, token_t *tokens, const size_t ntokens)
         return;
     }
 #endif
+
+    subcommand = tokens[SUBCOMMAND_TOKEN].value;
 
     /* dump ascii command
      * dump start <mode> [<prefix>] filepath\r\n
@@ -10590,7 +10603,7 @@ static void process_scan_command(conn *c, token_t *tokens, const size_t ntokens)
 #ifdef COMMAND_LOGGING
 static void process_cmdlog_command(conn *c, token_t *tokens, const size_t ntokens)
 {
-    char *type = tokens[SUBCOMMAND_TOKEN].value;
+    char *subcommand;
     bool already_check = false;
 
 #ifdef SASL_ENABLED
@@ -10600,7 +10613,9 @@ static void process_cmdlog_command(conn *c, token_t *tokens, const size_t ntoken
     }
 #endif
 
-    if (ntokens > 2 && strcmp(type, "start") == 0) {
+    subcommand = tokens[SUBCOMMAND_TOKEN].value;
+
+    if (ntokens > 2 && strcmp(subcommand, "start") == 0) {
         char *fpath = NULL;
         if (ntokens > 3) {
             fpath = tokens[SUBCOMMAND_TOKEN+1].value;
@@ -10615,14 +10630,14 @@ static void process_cmdlog_command(conn *c, token_t *tokens, const size_t ntoken
         } else {
             out_string(c, "\tcommand logging failed to start.\n");
         }
-    } else if (ntokens > 2 && strcmp(type, "stop") == 0) {
+    } else if (ntokens > 2 && strcmp(subcommand, "stop") == 0) {
         cmdlog_stop(&already_check);
         if (already_check) {
             out_string(c, "\tcommand logging already stopped.\n");
         } else {
             out_string(c, "\tcommand logging stopped.\n");
         }
-    } else if (ntokens > 2 && strcmp(type, "stats") == 0) {
+    } else if (ntokens > 2 && strcmp(subcommand, "stats") == 0) {
         char *str = cmdlog_stats();
         if (str) {
             write_and_free(c, str, strlen(str));
@@ -10638,7 +10653,7 @@ static void process_cmdlog_command(conn *c, token_t *tokens, const size_t ntoken
 #ifdef DETECT_LONG_QUERY
 static void process_lqdetect_command(conn *c, token_t *tokens, size_t ntokens)
 {
-    char *type = tokens[SUBCOMMAND_TOKEN].value;
+    char *subcommand;
     bool already_check = false;
 
 #ifdef SASL_ENABLED
@@ -10648,7 +10663,9 @@ static void process_lqdetect_command(conn *c, token_t *tokens, size_t ntokens)
     }
 #endif
 
-    if (ntokens > 2 && strcmp(type, "start") == 0) {
+    subcommand = tokens[SUBCOMMAND_TOKEN].value;
+
+    if (ntokens > 2 && strcmp(subcommand, "start") == 0) {
         uint32_t threshold = 0;
         if (ntokens > 3) {
             if (! safe_strtoul(tokens[SUBCOMMAND_TOKEN+1].value, &threshold)) {
@@ -10667,14 +10684,14 @@ static void process_lqdetect_command(conn *c, token_t *tokens, size_t ntokens)
         } else {
             out_string(c, "\tlong query detection failed to start.\n");
         }
-    } else if (ntokens > 2 && strcmp(type, "stop") == 0) {
+    } else if (ntokens > 2 && strcmp(subcommand, "stop") == 0) {
         lqdetect_stop(&already_check);
         if (already_check) {
             out_string(c, "\tlong query detection already stopped.\n");
         } else {
             out_string(c, "\tlong query detection stopped.\n");
         }
-    } else if (ntokens > 2 && strcmp(type, "show") == 0) {
+    } else if (ntokens > 2 && strcmp(subcommand, "show") == 0) {
         int size;
         char *str = lqdetect_result_get(&size);
         if (str) {
@@ -10682,7 +10699,7 @@ static void process_lqdetect_command(conn *c, token_t *tokens, size_t ntokens)
         } else {
             out_string(c, "SERVER_ERROR out of memory writing show response");
         }
-    } else if (ntokens > 2 && strcmp(type, "stats") == 0) {
+    } else if (ntokens > 2 && strcmp(subcommand, "stats") == 0) {
         char *str = lqdetect_stats();
         if (str) {
             write_and_free(c, str, strlen(str));
@@ -11096,9 +11113,16 @@ static inline int get_list_range_from_str(char *str, int32_t *from_index, int32_
 static void process_lop_command(conn *c, token_t *tokens, const size_t ntokens)
 {
     assert(c != NULL);
-    char *subcommand = tokens[SUBCOMMAND_TOKEN].value;
-    char *key = tokens[LOP_KEY_TOKEN].value;
-    size_t nkey = tokens[LOP_KEY_TOKEN].length;
+    char *subcommand;
+    char *key;
+    size_t nkey;
+
+    nkey = tokens[LOP_KEY_TOKEN].length;
+    if (nkey > KEY_MAX_LENGTH) {
+        out_string(c, "CLIENT_ERROR bad command line format");
+        return;
+    }
+    key = tokens[LOP_KEY_TOKEN].value;
 
 #ifdef SASL_ENABLED
     if (settings.require_sasl && !check_ascii_auth(c, AUTHZ_LIST, key, tokens, ntokens)) {
@@ -11107,12 +11131,10 @@ static void process_lop_command(conn *c, token_t *tokens, const size_t ntokens)
     }
 #endif
 
-    if (nkey > KEY_MAX_LENGTH) {
-        out_string(c, "CLIENT_ERROR bad command line format");
-        return;
-    }
     c->coll_key = key;
     c->coll_nkey = nkey;
+
+    subcommand = tokens[SUBCOMMAND_TOKEN].value;
 
     if (strcmp(subcommand, "insert") == 0) {
         int32_t index, vlen;
@@ -11448,9 +11470,16 @@ static void process_sop_create(conn *c, char *key, size_t nkey, item_attr *attrp
 static void process_sop_command(conn *c, token_t *tokens, const size_t ntokens)
 {
     assert(c != NULL);
-    char *subcommand = tokens[SUBCOMMAND_TOKEN].value;
-    char *key = tokens[SOP_KEY_TOKEN].value;
-    size_t nkey = tokens[SOP_KEY_TOKEN].length;
+    char *subcommand;
+    char *key;
+    size_t nkey;
+
+    nkey = tokens[SOP_KEY_TOKEN].length;
+    if (nkey > KEY_MAX_LENGTH) {
+        out_string(c, "CLIENT_ERROR bad command line format");
+        return;
+    }
+    key = tokens[SOP_KEY_TOKEN].value;
 
 #ifdef SASL_ENABLED
     if (settings.require_sasl && !check_ascii_auth(c, AUTHZ_SET, key, tokens, ntokens)) {
@@ -11459,12 +11488,10 @@ static void process_sop_command(conn *c, token_t *tokens, const size_t ntokens)
     }
 #endif
 
-    if (nkey > KEY_MAX_LENGTH) {
-        out_string(c, "CLIENT_ERROR bad command line format");
-        return;
-    }
     c->coll_key = key;
     c->coll_nkey = nkey;
+
+    subcommand = tokens[SUBCOMMAND_TOKEN].value;
 
     if (strcmp(subcommand,"insert") == 0) {
         int32_t vlen;
@@ -12663,10 +12690,17 @@ static void process_mop_create(conn *c, char *key, size_t nkey, item_attr *attrp
 static void process_mop_command(conn *c, token_t *tokens, const size_t ntokens)
 {
     assert(c != NULL);
-    char *subcommand = tokens[SUBCOMMAND_TOKEN].value;
-    char *key = tokens[MOP_KEY_TOKEN].value;
-    size_t nkey = tokens[MOP_KEY_TOKEN].length;
+    char *subcommand;
+    char *key;
+    size_t nkey;
     int subcommid;
+
+    nkey = tokens[MOP_KEY_TOKEN].length;
+    if (nkey > KEY_MAX_LENGTH) {
+        out_string(c, "CLIENT_ERROR bad command line format");
+        return;
+    }
+    key = tokens[MOP_KEY_TOKEN].value;
 
 #ifdef SASL_ENABLED
     if (settings.require_sasl && !check_ascii_auth(c, AUTHZ_MAP, key, tokens, ntokens)) {
@@ -12675,12 +12709,10 @@ static void process_mop_command(conn *c, token_t *tokens, const size_t ntokens)
     }
 #endif
 
-    if (nkey > KEY_MAX_LENGTH) {
-        out_string(c, "CLIENT_ERROR bad command line format");
-        return;
-    }
     c->coll_key = key;
     c->coll_nkey = nkey;
+
+    subcommand = tokens[SUBCOMMAND_TOKEN].value;
 
     if ((strcmp(subcommand,"insert") == 0 && (subcommid = (int)OPERATION_MOP_INSERT)) ||
         (strcmp(subcommand,"upsert") == 0 && (subcommid = (int)OPERATION_MOP_UPSERT))) {
@@ -12908,10 +12940,17 @@ static void process_mop_command(conn *c, token_t *tokens, const size_t ntokens)
 static void process_bop_command(conn *c, token_t *tokens, const size_t ntokens)
 {
     assert(c != NULL);
-    char *subcommand = tokens[SUBCOMMAND_TOKEN].value;
-    char *key = tokens[BOP_KEY_TOKEN].value;
-    size_t nkey = tokens[BOP_KEY_TOKEN].length;
+    char *subcommand;
+    char *key;
+    size_t nkey;
     int subcommid;
+
+    nkey = tokens[BOP_KEY_TOKEN].length;
+    if (nkey > KEY_MAX_LENGTH) {
+        out_string(c, "CLIENT_ERROR bad command line format");
+        return;
+    }
+    key = tokens[BOP_KEY_TOKEN].value;
 
 #ifdef SASL_ENABLED
     if (settings.require_sasl && !check_ascii_auth(c, AUTHZ_BTREE, key, tokens, ntokens)) {
@@ -12920,12 +12959,10 @@ static void process_bop_command(conn *c, token_t *tokens, const size_t ntokens)
     }
 #endif
 
-    if (nkey > KEY_MAX_LENGTH) {
-        out_string(c, "CLIENT_ERROR bad command line format");
-        return;
-    }
     c->coll_key = key;
     c->coll_nkey = nkey;
+
+    subcommand = tokens[SUBCOMMAND_TOKEN].value;
 
     if ((strcmp(subcommand,"insert") == 0 && (subcommid = (int)OPERATION_BOP_INSERT)) ||
         (strcmp(subcommand,"upsert") == 0 && (subcommid = (int)OPERATION_BOP_UPSERT))) {
@@ -13599,8 +13636,15 @@ static size_t attr_to_printable_buffer(char *ptr, ENGINE_ITEM_ATTR attr_id, item
 static void process_getattr_command(conn *c, token_t *tokens, const size_t ntokens)
 {
     assert(c != NULL);
-    char   *key = tokens[KEY_TOKEN].value;
-    size_t nkey = tokens[KEY_TOKEN].length;
+    char *key;
+    size_t nkey;
+
+    nkey = tokens[KEY_TOKEN].length;
+    if (nkey > KEY_MAX_LENGTH) {
+        out_string(c, "CLIENT_ERROR bad command line format");
+        return;
+    }
+    key = tokens[KEY_TOKEN].value;
 
 #ifdef SASL_ENABLED
     if (settings.require_sasl && !check_ascii_auth(c, AUTHZ_ATTR, key, tokens, ntokens)) {
@@ -13608,11 +13652,6 @@ static void process_getattr_command(conn *c, token_t *tokens, const size_t ntoke
         return;
     }
 #endif
-
-    if (nkey > KEY_MAX_LENGTH) {
-        out_string(c, "CLIENT_ERROR bad command line format");
-        return;
-    }
 
     ENGINE_ERROR_CODE ret = ENGINE_SUCCESS;
     item_attr attr_data;
@@ -13697,8 +13736,15 @@ static void process_setattr_command(conn *c, token_t *tokens, const size_t ntoke
 {
     assert(c != NULL);
     assert(c->ewouldblock == false);
-    char *key = tokens[KEY_TOKEN].value;
-    size_t nkey = tokens[KEY_TOKEN].length;
+    char *key;
+    size_t nkey;
+
+    nkey = tokens[KEY_TOKEN].length;
+    if (nkey > KEY_MAX_LENGTH) {
+        out_string(c, "CLIENT_ERROR bad command line format");
+        return;
+    }
+    key = tokens[KEY_TOKEN].value;
 
 #ifdef SASL_ENABLED
     if (settings.require_sasl && !check_ascii_auth(c, AUTHZ_ATTR, key, tokens, ntokens)) {
@@ -13706,11 +13752,6 @@ static void process_setattr_command(conn *c, token_t *tokens, const size_t ntoke
         return;
     }
 #endif
-
-    if (nkey > KEY_MAX_LENGTH) {
-        out_string(c, "CLIENT_ERROR bad command line format");
-        return;
-    }
 
     ENGINE_ERROR_CODE ret = ENGINE_SUCCESS;
     item_attr attr_data;
@@ -13824,8 +13865,15 @@ static void process_touch_command(conn *c, token_t *tokens, const size_t ntokens
 {
     assert(c != NULL);
     assert(c->ewouldblock == false);
-    char *key = tokens[KEY_TOKEN].value;
-    size_t nkey = tokens[KEY_TOKEN].length;
+    char *key;
+    size_t nkey;
+
+    nkey = tokens[KEY_TOKEN].length;
+    if (nkey > KEY_MAX_LENGTH) {
+        out_string(c, "CLIENT_ERROR bad command line format");
+        return;
+    }
+    key = tokens[KEY_TOKEN].value;
 
 #ifdef SASL_ENABLED
     if (settings.require_sasl && !check_ascii_auth(c, AUTHZ_ATTR, key, tokens, ntokens)) {
@@ -13833,11 +13881,6 @@ static void process_touch_command(conn *c, token_t *tokens, const size_t ntokens
         return;
     }
 #endif
-
-    if (nkey > KEY_MAX_LENGTH) {
-        out_string(c, "CLIENT_ERROR bad command line format");
-        return;
-    }
 
     ENGINE_ERROR_CODE ret;
     item_attr attr_data;
