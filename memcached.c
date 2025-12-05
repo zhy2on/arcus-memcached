@@ -9084,20 +9084,27 @@ static void process_arithmetic_command(conn *c, token_t *tokens, const size_t nt
         return;
     }
 
+    bool bad_line = false;
     bool create = false;
     unsigned int flags  = 0;
     int64_t exptime = 0;
     uint64_t init_value = 0;
 
     if (ntokens >= 7) {
-        if (! (safe_strtoul(tokens[3].value, (uint32_t *)&flags)
-               && safe_strtoll(tokens[4].value, &exptime)
-               && safe_strtoull(tokens[5].value, &init_value))) {
-            print_invalid_command(c, tokens, ntokens);
-            out_string(c, "CLIENT_ERROR bad command line format");
-            return;
+        if (safe_strtoul(tokens[3].value, (uint32_t *)&flags)
+            && safe_strtoll(tokens[4].value, &exptime)
+            && safe_strtoull(tokens[5].value, &init_value)) {
+            create = true;
+        } else {
+            bad_line = true;
         }
-        create = true;
+    } else if (ntokens == 6) {
+        bad_line = true;
+    }
+    if (bad_line) {
+        print_invalid_command(c, tokens, ntokens);
+        out_string(c, "CLIENT_ERROR bad command line format");
+        return;
     }
 
     if (settings.detail_enabled) {
@@ -13992,12 +13999,12 @@ static void process_command_ascii(conn *c, char *command, int cmdlen)
     {
         process_update_command(c, tokens, ntokens, (ENGINE_STORE_OPERATION)comm, true);
     }
-    else if ((ntokens == 4 || ntokens == 5 || ntokens == 7 || ntokens == 8) &&
+    else if ((ntokens >= 4 && ntokens <= 8) &&
         (strcmp(tokens[COMMAND_TOKEN].value, "incr") == 0))
     {
         process_arithmetic_command(c, tokens, ntokens, 1);
     }
-    else if ((ntokens == 4 || ntokens == 5 || ntokens == 7 || ntokens == 8) &&
+    else if ((ntokens >= 4 && ntokens <= 8) &&
         (strcmp(tokens[COMMAND_TOKEN].value, "decr") == 0))
     {
         process_arithmetic_command(c, tokens, ntokens, 0);
