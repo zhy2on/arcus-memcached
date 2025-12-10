@@ -42,6 +42,8 @@
 #define SSTATE_NONE     0
 #define SSTATE_NORMAL   1
 
+static EXTENSION_LOGGER_DESCRIPTOR *mc_logger;
+
 /* continuum item */
 struct cont_item {
     uint32_t hpoint;  // hash point on the ketama continuum
@@ -76,12 +78,11 @@ struct cluster_config {
     void              *cur_memory;  // current memory for nodearray and continuum
     void              *old_memory;  // old     memory for nodearray and continuum
 
-    pthread_mutex_t config_lock;         // config lock
-    pthread_mutex_t ketama_lock;         // ketama hashring lock
-    EXTENSION_LOGGER_DESCRIPTOR *logger; // memcached logger
-    int       verbose;                   // log level
-    bool      is_valid;                  // is this configuration valid?
-    bool      enable_shard_key;          // use shard key feature
+    pthread_mutex_t config_lock;    // config lock
+    pthread_mutex_t ketama_lock;    // ketama hashring lock
+    int       verbose;              // log level
+    bool      is_valid;             // is this configuration valid?
+    bool      enable_shard_key;     // use shard key feature
 };
 
 
@@ -279,7 +280,7 @@ static void do_self_node_build(struct cluster_config *config, const char *node_n
     struct node_item *item = &config->self_node;
     do_node_item_init(item, node_name, NSTATE_EXISTING, SSTATE_NORMAL);
     if (item->dup_hp) {
-        config->logger->log(EXTENSION_LOG_INFO, NULL,
+        mc_logger->log(EXTENSION_LOG_INFO, NULL,
                 "[CHECK] Duplicate hash point in self node.\n");
     }
     item->refcnt += 1; /* +1 refcnt for self node not to be freed */
@@ -293,7 +294,7 @@ static struct node_item *do_node_item_build(struct cluster_config *config,
     if (item) {
         do_node_item_init(item, node_name, node_state, slice_state);
         if (item->dup_hp) {
-            config->logger->log(EXTENSION_LOG_INFO, NULL,
+            mc_logger->log(EXTENSION_LOG_INFO, NULL,
                     "[CHECK] Duplicate hssh point in %s node.\n", node_name);
         }
     }
@@ -310,8 +311,8 @@ static int do_hashring_space_init(struct cluster_config *config, uint32_t num_no
     do {
         /* init free node list */
         if (do_node_free_list_prepare(config, num_nodes) < 0) {
-            config->logger->log(EXTENSION_LOG_WARNING, NULL,
-                                "Failed to init free node list.\n");
+            mc_logger->log(EXTENSION_LOG_WARNING, NULL,
+                           "Failed to init free node list.\n");
             ret = -1; break;
         }
 
@@ -320,15 +321,13 @@ static int do_hashring_space_init(struct cluster_config *config, uint32_t num_no
                            + (num_nodes * NUM_NODE_HASHES * sizeof(void*));
         config->old_memory = malloc(config->old_memlen);
         if (config->old_memory == NULL) {
-            config->logger->log(EXTENSION_LOG_WARNING, NULL,
-                                "Failed to init old memory.\n");
+            mc_logger->log(EXTENSION_LOG_WARNING, NULL, "Failed to init old memory.\n");
             ret = -1; break;
         }
         config->cur_memlen = config->old_memlen;
         config->cur_memory = malloc(config->cur_memlen);
         if (config->cur_memory == NULL) {
-            config->logger->log(EXTENSION_LOG_WARNING, NULL,
-                                "Failed to init cur memory.\n");
+            mc_logger->log(EXTENSION_LOG_WARNING, NULL, "Failed to init cur memory.\n");
             ret = -1; break;
         }
     } while(0);
@@ -350,8 +349,8 @@ static int do_hashring_space_prepare(struct cluster_config *config, uint32_t num
 
     /* prepare free node list */
     if (do_node_free_list_prepare(config, num_nodes) < 0) {
-        config->logger->log(EXTENSION_LOG_WARNING, NULL,
-                            "Failed to prepare free node list.\n");
+        mc_logger->log(EXTENSION_LOG_WARNING, NULL,
+                       "Failed to prepare free node list.\n");
         return -1;
     }
 
@@ -360,8 +359,8 @@ static int do_hashring_space_prepare(struct cluster_config *config, uint32_t num
                + (num_nodes * NUM_NODE_HASHES * sizeof(void*));
     if (config->old_memlen < new_memlen) {
         if ((new_memory = realloc(config->old_memory, new_memlen)) == NULL) {
-            config->logger->log(EXTENSION_LOG_WARNING, NULL,
-                                "Failed to prepare hash ring space.\n");
+            mc_logger->log(EXTENSION_LOG_WARNING, NULL,
+                           "Failed to prepare hash ring space.\n");
             return -1;
         }
         config->old_memory = new_memory;
@@ -470,11 +469,11 @@ static void do_nodearray_print(struct cluster_config *config)
 {
     struct node_item **nodearray = config->nodearray;
 
-    config->logger->log(EXTENSION_LOG_INFO, NULL, "cluster nodearray: count=%d\n",
-                        config->num_nodes);
+    mc_logger->log(EXTENSION_LOG_INFO, NULL, "cluster nodearray: count=%d\n",
+                   config->num_nodes);
     for (int i=0; i < config->num_nodes; i++) {
-        config->logger->log(EXTENSION_LOG_INFO, NULL, "node[%d]: name=%s state=%d\n", i,
-                            nodearray[i]->ndname, nodearray[i]->nstate);
+        mc_logger->log(EXTENSION_LOG_INFO, NULL, "node[%d]: name=%s state=%d\n", i,
+                       nodearray[i]->ndname, nodearray[i]->nstate);
     }
 }
 
@@ -501,10 +500,10 @@ static void do_continuum_print(struct cluster_config *config)
 {
     struct cont_item **continuum = config->continuum;
 
-    config->logger->log(EXTENSION_LOG_INFO, NULL, "cluster continuum: count=%d\n",
-                       config->num_conts);
+    mc_logger->log(EXTENSION_LOG_INFO, NULL, "cluster continuum: count=%d\n",
+                   config->num_conts);
     for (int i=0; i < config->num_conts; i++) {
-        config->logger->log(EXTENSION_LOG_INFO, NULL,
+        mc_logger->log(EXTENSION_LOG_INFO, NULL,
                     "continuum[%d]: hpoint=%x nindex=%d sstate=%d\n", i,
                     continuum[i]->hpoint, continuum[i]->nindex, continuum[i]->sstate);
     }
@@ -547,7 +546,7 @@ static void do_hashring_replace(struct cluster_config *config, struct cont_item 
     } else {
         for (int i=1; i < config->num_conts; i++) {
             if (continuum[i-1]->hpoint == continuum[i]->hpoint) {
-                config->logger->log(EXTENSION_LOG_INFO, NULL,
+                mc_logger->log(EXTENSION_LOG_INFO, NULL,
                         "[CHECK] Duplicate hash point in (%s:%d) and (%s:%d).\n",
                         nodearray[continuum[i-1]->nindex]->ndname, continuum[i-1]->sindex,
                         nodearray[continuum[i]->nindex]->ndname, continuum[i]->sindex);
@@ -593,9 +592,11 @@ struct cluster_config *cluster_config_init(const char *node_name,
     struct cluster_config *config;
     int err;
 
+    mc_logger = logger;
+
     config = calloc(1, sizeof(struct cluster_config));
     if (config == NULL) {
-        logger->log(EXTENSION_LOG_WARNING, NULL, "calloc failed: cluster_config\n");
+        mc_logger->log(EXTENSION_LOG_WARNING, NULL, "calloc failed: cluster_config\n");
         return NULL;
     }
 
@@ -612,7 +613,6 @@ struct cluster_config *cluster_config_init(const char *node_name,
 
     config->self_id = -1;
     config->is_valid = false;
-    config->logger = logger;
     config->verbose = verbose;
 
     char *enable_shard_key = getenv("ARCUS_ENABLE_SHARD_KEY");
@@ -654,8 +654,8 @@ int cluster_config_reconfigure(struct cluster_config *config,
     int error=0;
 
     if (num_nodes == 0) { /* empty cluster */
-        config->logger->log(EXTENSION_LOG_WARNING, NULL,
-                            "reconfiguration: empty cluster...\n");
+        mc_logger->log(EXTENSION_LOG_WARNING, NULL,
+                       "reconfiguration: empty cluster...\n");
         pthread_mutex_lock(&config->config_lock);
         nodearray = (struct node_item **)config->old_memory;
         continuum = (struct cont_item **)nodearray;
@@ -668,8 +668,8 @@ int cluster_config_reconfigure(struct cluster_config *config,
     }
 
     if (do_node_string_check(node_strs, num_nodes) < 0) {
-        config->logger->log(EXTENSION_LOG_WARNING, NULL,
-                            "reconfiguration failed: invalid node token found.\n");
+        mc_logger->log(EXTENSION_LOG_WARNING, NULL,
+                       "reconfiguration failed: invalid node token found.\n");
         return -1;
     }
 
@@ -679,8 +679,8 @@ int cluster_config_reconfigure(struct cluster_config *config,
                                                &self_id, &error);
     if (nodearray == NULL) {
         if (error != 0) {
-            config->logger->log(EXTENSION_LOG_WARNING, NULL,
-                                "reconfiguration failed: do_nodearray_build\n");
+            mc_logger->log(EXTENSION_LOG_WARNING, NULL,
+                           "reconfiguration failed: do_nodearray_build\n");
             config->is_valid = false;
         }
     } else {
