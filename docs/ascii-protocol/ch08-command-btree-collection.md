@@ -401,12 +401,12 @@ flags와 ecount를 포함하여 조회된 element 정보가 생략된다.
 <a id="bop-smget"></a>
 ## bop smget 명령
 
-여러 b+tree들에서 bkey range 조건과 eflag filter 조건을 모두 만족하는
-elements를 sort merge 형태로 조회하면서 count 개의 elements를 가져온다.
-즉, 여러 b+tree들을 하나의 large b+tree로 구성되어 있다고 보고,
-이에 대한 element 조회 기능과 동일하다.
+여러 b+tree들에서 bkey range 조건과 eflag filter 조건을 모두 만족하는 elements를
+sort merge 방식으로 count 개의 elements를 조회한다.
+즉, 여러 b+tree들이 하나의 large b+tree로 구성되어 있다고 보고 이에 대한 element 조회 기능이다.
 
-- smget 조회를 수행할 수 없는 아래 상태의 b+tree key들을 missed keys로 분류하고 이들의 elements는 smget 결과에 반영할 수 없다.
+bop smget 연산에서 알아두어야 할 사항은 다음과 같다.
+- smget 조회가 불가한 아래 상태의 b+tree key들을 missed keys로 분류하고 이들의 elements는 smget 결과에 반영하지 않는다.
 따라서, 응용에서는 missed keys에 대해 백엔드 저장소인 DB에서 elements를 조회하여 최종 smget 결과에 반영해야 한다.
   - 캐시에 존재하지 않는 key
   - 조회가 현재 허용되지 않는 key (`UNREADABLE` 상태)
@@ -419,7 +419,7 @@ elements를 sort merge 형태로 조회하면서 count 개의 elements를 가져
 이전에 조회된 bkey 값을 바탕으로 bkey range를 재조정하여 사용할 수 있다.
 
 ```
-bop smget <lenkeys> <numkeys> <bkey or "bkey range"> [<eflag_filter>] <count> duplicate|unique\r\n
+bop smget <lenkeys> <numkeys> <bkey or "bkey range"> [<eflag_filter>] <count> {duplicate|unique}\r\n
 <"space separated keys">\r\n
 * <eflag_filter> : <offset> [<bitwop> <bitwvalue>] <compop> <compvalue>
 ```
@@ -430,7 +430,7 @@ bop smget <lenkeys> <numkeys> <bkey or "bkey range"> [<eflag_filter>] <count> du
 - \<eflag_filter\> - eflag filter 조건.
    [Collection 기본 개념](ch02-collection-items.md)에서 eflag filter 참조 바란다.
 - \<count\> - 조회할 element 개수
-- `duplicate|unique` - duplicate는 중복 bkey를 허용하고, unique는 중복 bkey를 제거한다.
+- {duplicate|unique} - 둘 중의 하나를 명시해야 하며, duplicate는 중복 bkey를 허용하고, unique는 중복 bkey를 제거한다.
 - \<"space separated keys"\> - 대상 b+tree들의 key list로, 스페이스(' ')로 구분한다.
      - 하위 호환성(1.10.X 이하 버전)을 위해 콤마(,)도 지원하지만 권장하지 않는다.
 
