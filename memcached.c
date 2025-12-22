@@ -16126,12 +16126,12 @@ int main (int argc, char **argv)
             break;
         case 'm':
             cache_memory_limit = atoi(optarg);
-            settings.maxbytes = (size_t)cache_memory_limit * 1024 * 1024;
             if (cache_memory_limit <= 0) {
                 mc_logger->log(EXTENSION_LOG_WARNING, NULL,
                     "The value of memory limit must be greater than 0.\n");
                 return 1;
             }
+            settings.maxbytes = (size_t)cache_memory_limit * 1024 * 1024;
             break;
         case 'M':
             settings.evict_to_free = 0;
@@ -16139,12 +16139,12 @@ int main (int argc, char **argv)
 #ifdef ENABLE_STICKY_ITEM
         case 'g':
             sticky_memory_limit = atoi(optarg);
-            settings.sticky_limit = (size_t)sticky_memory_limit * 1024 * 1024;
             if (sticky_memory_limit <= 0) {
                 mc_logger->log(EXTENSION_LOG_WARNING, NULL,
                     "The value of sticky(gummed) memory limit must be greater than 0.\n");
                 return 1;
             }
+            settings.sticky_limit = (size_t)sticky_memory_limit * 1024 * 1024;
             break;
 #endif
         case 'c':
@@ -16340,15 +16340,27 @@ int main (int argc, char **argv)
             return 1;
         }
     }
+
+#ifdef ENABLE_STICKY_ITEM
+    if (settings.maxbytes < settings.sticky_limit) {
+        mc_logger->log(EXTENSION_LOG_WARNING, NULL,
+            "The value of memory limit cannot be smaller than sticky_limit.\n");
+        return 1;
+    }
+#endif
+
+    /* build options to pass to the cache/storage engine. */
     old_opts += sprintf(old_opts, "num_threads=%lu;", (unsigned long)settings.num_threads);
     old_opts += sprintf(old_opts, "cache_size=%llu;", (unsigned long long)settings.maxbytes);
     if (settings.evict_to_free == 0) {
         old_opts += sprintf(old_opts, "eviction=false;");
     }
+#ifdef ENABLE_STICKY_ITEM
     if (settings.sticky_limit > 0) {
         old_opts += sprintf(old_opts, "sticky_limit=%llu;",
                             (unsigned long long)settings.sticky_limit);
     }
+#endif
     if (settings.factor != 1.25) {
         old_opts += sprintf(old_opts, "factor=%f;", settings.factor);
     }
@@ -16522,13 +16534,6 @@ int main (int argc, char **argv)
     if (settings.udpport != 0) {
         nfiles += settings.num_threads * 2;
     }
-
-    if (settings.maxbytes < settings.sticky_limit) {
-        mc_logger->log(EXTENSION_LOG_WARNING, NULL,
-            "The value of memory limit cannot be smaller than sticky_limit.\n");
-        return 1;
-    }
-
     if (settings.maxconns <= nfiles) {
         mc_logger->log(EXTENSION_LOG_WARNING, NULL,
                 "Configuration error. \n"
