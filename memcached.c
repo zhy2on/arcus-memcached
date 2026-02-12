@@ -10007,7 +10007,7 @@ static void process_dump_command(conn *c, token_t *tokens, const size_t ntokens)
     subcommand = tokens[SUBCOMMAND_TOKEN].value;
 
     /* dump ascii command
-     * dump start <mode> [<prefix>] filepath\r\n
+     * dump start <mode> [<prefix>] <filepath>\r\n
      *   <mode> : key
      * dump stop\r\n
      */
