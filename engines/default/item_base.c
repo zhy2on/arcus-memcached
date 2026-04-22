@@ -440,9 +440,9 @@ static uint32_t do_coll_elem_delete_with_count(hash_item *it, uint32_t count)
         if (IS_BTREE_ITEM(it)) {
             ndeleted = btree_elem_delete_with_count((void *)info, count);
         } else if (IS_SET_ITEM(it)) {
-            ndeleted = set_elem_delete_with_count((void *)info, count);
+            ndeleted = do_set_elem_delete((void *)info, count, ELEM_DELETE_COLL);
         } else if (IS_MAP_ITEM(it)) {
-            ndeleted = map_elem_delete_with_count((void *)info, count);
+            ndeleted = do_map_elem_delete((void *)info, count, ELEM_DELETE_COLL);
         } else if (IS_LIST_ITEM(it)) {
             ndeleted = list_elem_delete_with_count((void *)info, count);
         }

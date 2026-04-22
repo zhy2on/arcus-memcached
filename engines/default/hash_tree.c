@@ -99,7 +99,7 @@ bool do_htree_node_is_leaf(const htree_hash_node *node)
 
 /* Split: redistribute par_node->htab[par_hidx] elem chain into child node.
  * If par_node is NULL, sets *root to node (root initialization). */
-void do_htree_node_link(htree_hash_node **root,
+void do_htree_node_insert(htree_hash_node **root,
                         htree_hash_node *par_node, int par_hidx,
                         htree_hash_node *node)
 {
@@ -131,7 +131,7 @@ void do_htree_node_link(htree_hash_node **root,
 
 /* Merge: pull all elems from child node back up to par_node->htab[par_hidx].
  * If par_node is NULL, clears *root and frees the root node. */
-void do_htree_node_unlink(htree_hash_node **root,
+void do_htree_node_remove(htree_hash_node **root,
                           htree_hash_node *par_node, int par_hidx)
 {
     htree_hash_node *node;
@@ -184,7 +184,7 @@ static inline bool htree_elem_match(const htree_elem_item *elem,
     return (elem->nbytes == klen && memcmp(elem->data, key, klen) == 0);
 }
 
-ENGINE_ERROR_CODE do_htree_elem_link(htree_hash_node **root,
+ENGINE_ERROR_CODE do_htree_elem_insert(htree_hash_node **root,
                                      htree_elem_item *elem,
                                      const void *key, size_t klen,
                                      bool replace_if_exist,
@@ -229,7 +229,7 @@ ENGINE_ERROR_CODE do_htree_elem_link(htree_hash_node **root,
         htree_hash_node *n_node = do_htree_node_alloc(node->hdepth + 1, cookie);
         if (n_node == NULL)
             return ENGINE_ENOMEM;
-        do_htree_node_link(root, node, hidx, n_node);
+        do_htree_node_insert(root, node, hidx, n_node);
         if (node_split) *node_split = true;
         node = n_node;
         hidx = HTREE_GET_HASHIDX(elem->hval, node->hdepth);
@@ -304,7 +304,7 @@ htree_elem_item *do_htree_elem_at_offset(htree_hash_node **root,
             if (delete) {
                 if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2)
                     && do_htree_node_is_leaf(child_node)) {
-                    do_htree_node_unlink(root, node, hidx);
+                    do_htree_node_remove(root, node, hidx);
                 }
                 node->tot_elem_cnt -= 1;
             }
@@ -323,7 +323,7 @@ htree_elem_item *do_htree_elem_at_offset(htree_hash_node **root,
             }
             elem->refcount++;
             if (delete) {
-                do_htree_elem_unlink(node, hidx, prev, elem);
+                do_htree_elem_remove(node, hidx, prev, elem);
                 if (on_delete) on_delete(elem, ELEM_DELETE_NORMAL, ctx);
             }
             return elem;
@@ -353,7 +353,7 @@ int do_htree_traverse_dfs_bycnt(htree_hash_node **root,
             if (delete && child_fcnt > 0) {
                 if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2) &&
                     do_htree_node_is_leaf(child_node)) {
-                    do_htree_node_unlink(root, node, hidx);
+                    do_htree_node_remove(root, node, hidx);
                 }
                 node->tot_elem_cnt -= child_fcnt;
             }
@@ -366,7 +366,7 @@ int do_htree_traverse_dfs_bycnt(htree_hash_node **root,
                 }
                 fcnt++;
                 if (delete) {
-                    do_htree_elem_unlink(node, hidx, NULL, elem);
+                    do_htree_elem_remove(node, hidx, NULL, elem);
                     if (on_delete) on_delete(elem, cause, ctx);
                 }
                 if (count > 0 && fcnt >= count) break;
@@ -397,7 +397,7 @@ bool do_htree_traverse_dfs_byfield(htree_hash_node **root,
         if (ret && delete) {
             if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2) &&
                 do_htree_node_is_leaf(child_node)) {
-                do_htree_node_unlink(root, node, hidx);
+                do_htree_node_remove(root, node, hidx);
             }
             node->tot_elem_cnt -= 1;
         }
@@ -413,7 +413,7 @@ bool do_htree_traverse_dfs_byfield(htree_hash_node **root,
                         elem_array[0] = elem;
                     }
                     if (delete) {
-                        do_htree_elem_unlink(node, hidx, prev, elem);
+                        do_htree_elem_remove(node, hidx, prev, elem);
                         if (on_delete) on_delete(elem, ELEM_DELETE_NORMAL, ctx);
                     }
                     ret = true;
@@ -427,7 +427,7 @@ bool do_htree_traverse_dfs_byfield(htree_hash_node **root,
     return ret;
 }
 
-void do_htree_elem_unlink(htree_hash_node *node, const int hidx,
+void do_htree_elem_remove(htree_hash_node *node, const int hidx,
                           htree_elem_item *prev, htree_elem_item *elem)
 {
     if (prev != NULL) prev->next = elem->next;

@@ -124,7 +124,7 @@ static void do_map_node_link(map_meta_info *info,
                              map_hash_node *par_node, const int par_hidx,
                              map_hash_node *node)
 {
-    do_htree_node_link(&info->root, par_node, par_hidx, node);
+    do_htree_node_insert(&info->root, par_node, par_hidx, node);
 
     size_t stotal = slabs_space_size(sizeof(map_hash_node));
     do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, stotal);
@@ -133,7 +133,7 @@ static void do_map_node_link(map_meta_info *info,
 static void do_map_node_unlink(map_meta_info *info,
                                map_hash_node *par_node, const int par_hidx)
 {
-    do_htree_node_unlink(&info->root, par_node, par_hidx);
+    do_htree_node_remove(&info->root, par_node, par_hidx);
 
     if (info->stotal > 0) {
         size_t stotal = slabs_space_size(sizeof(map_hash_node));
@@ -183,11 +183,6 @@ static void do_map_elem_replace(map_meta_info *info,
     }
 }
 
-static map_elem_item *do_map_elem_find(map_hash_node *root, const field_t *field, htree_prev_info *pinfo)
-{
-    return (map_elem_item *)do_htree_elem_find(root, field->value, field->length, pinfo);
-}
-
 static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *elem,
                                           const bool replace_if_exist, bool *replaced,
                                           const void *cookie)
@@ -230,7 +225,7 @@ static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *el
     bool node_split;
     ENGINE_ERROR_CODE ret;
 
-    ret = do_htree_elem_link(&info->root, (htree_elem_item *)elem,
+    ret = do_htree_elem_insert(&info->root, (htree_elem_item *)elem,
                              elem->data, elem->nfield,
                              replace_if_exist, &old_elem, &node_split, cookie);
     if (ret != ENGINE_SUCCESS)
@@ -319,7 +314,7 @@ static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
     htree_prev_info  pinfo;
     map_elem_item *elem;
 
-    elem = do_map_elem_find(info->root, field, &pinfo);
+    elem = (map_elem_item *)do_htree_elem_find(info->root, field->value, field->length, &pinfo);
     if (elem == NULL) {
         return ENGINE_ELEM_ENOENT;
     }
@@ -358,7 +353,7 @@ static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
     return ENGINE_SUCCESS;
 }
 
-static uint32_t do_map_elem_delete(map_meta_info *info, const uint32_t count,
+uint32_t do_map_elem_delete(map_meta_info *info, const uint32_t count,
                                    enum elem_delete_cause cause)
 {
     assert(cause == ELEM_DELETE_COLL);
@@ -654,10 +649,6 @@ ENGINE_ERROR_CODE map_elem_get(const char *key, const uint32_t nkey,
     return ret;
 }
 
-uint32_t map_elem_delete_with_count(map_meta_info *info, const uint32_t count)
-{
-    return do_map_elem_delete(info, count, ELEM_DELETE_COLL);
-}
 
 /* See do_map_elem_traverse_dfs and do_map_elem_link. do_map_elem_traverse_dfs
  * can visit all elements, but only supports get and delete operations.

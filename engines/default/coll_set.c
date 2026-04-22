@@ -170,7 +170,7 @@ static void do_set_node_link(set_meta_info *info,
                              set_hash_node *par_node, const int par_hidx,
                              set_hash_node *node)
 {
-    do_htree_node_link(&info->root, par_node, par_hidx, node);
+    do_htree_node_insert(&info->root, par_node, par_hidx, node);
 
     size_t stotal = slabs_space_size(sizeof(set_hash_node));
     do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
@@ -179,7 +179,7 @@ static void do_set_node_link(set_meta_info *info,
 static void do_set_node_unlink(set_meta_info *info,
                                set_hash_node *par_node, const int par_hidx)
 {
-    do_htree_node_unlink(&info->root, par_node, par_hidx);
+    do_htree_node_remove(&info->root, par_node, par_hidx);
 
     if (info->stotal > 0) {
         size_t stotal = slabs_space_size(sizeof(set_hash_node));
@@ -194,7 +194,7 @@ static ENGINE_ERROR_CODE do_set_elem_link(set_meta_info *info, set_elem_item *el
     bool node_split;
     ENGINE_ERROR_CODE ret;
 
-    ret = do_htree_elem_link(&info->root, (htree_elem_item *)elem,
+    ret = do_htree_elem_insert(&info->root, (htree_elem_item *)elem,
                              elem->data, elem->nbytes,
                              false, NULL, &node_split, cookie);
     if (ret != ENGINE_SUCCESS)
@@ -250,7 +250,7 @@ static ENGINE_ERROR_CODE do_set_elem_delete_with_value(set_meta_info *info,
     return found ? ENGINE_SUCCESS : ENGINE_ELEM_ENOENT;
 }
 
-static uint32_t do_set_elem_delete(set_meta_info *info, const uint32_t count,
+uint32_t do_set_elem_delete(set_meta_info *info, const uint32_t count,
                                    enum elem_delete_cause cause)
 {
     assert(cause == ELEM_DELETE_COLL);
@@ -598,10 +598,6 @@ ENGINE_ERROR_CODE set_elem_get(const char *key, const uint32_t nkey,
     return ret;
 }
 
-uint32_t set_elem_delete_with_count(set_meta_info *info, const uint32_t count)
-{
-    return do_set_elem_delete(info, count, ELEM_DELETE_COLL);
-}
 
 /* See do_set_elem_traverse_dfs and do_set_elem_link. do_set_elem_traverse_dfs
  * can visit all elements, but only supports get and delete operations.

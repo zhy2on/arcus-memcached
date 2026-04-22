@@ -41,11 +41,11 @@ void              do_htree_elem_free(htree_elem_item *elem);
 
 void              do_htree_elem_release(htree_elem_item *elem);
 
-void              do_htree_node_link(htree_hash_node **root,
+void              do_htree_node_insert(htree_hash_node **root,
                                      htree_hash_node *par_node, int par_hidx,
                                      htree_hash_node *node);
 
-void              do_htree_node_unlink(htree_hash_node **root,
+void              do_htree_node_remove(htree_hash_node **root,
                                        htree_hash_node *par_node, int par_hidx);
 
 typedef void (*htree_elem_delete_cb)(htree_elem_item *elem,
@@ -75,14 +75,14 @@ bool              do_htree_traverse_dfs_byfield(htree_hash_node **root,
                                                htree_elem_delete_cb on_delete,
                                                void *ctx);
 
-void              do_htree_elem_unlink(htree_hash_node *node, const int hidx,
+void              do_htree_elem_remove(htree_hash_node *node, const int hidx,
                                        htree_elem_item *prev, htree_elem_item *elem);
 
 htree_elem_item  *do_htree_elem_find(htree_hash_node *root,
                                      const void *key, size_t klen,
                                      htree_prev_info *pinfo);
                                      
-ENGINE_ERROR_CODE do_htree_elem_link(htree_hash_node **root,
+ENGINE_ERROR_CODE do_htree_elem_insert(htree_hash_node **root,
                                      htree_elem_item *elem,
                                      const void *key, size_t klen,
                                      bool replace_if_exist,
