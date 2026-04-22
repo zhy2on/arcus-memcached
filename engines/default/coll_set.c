@@ -114,14 +114,7 @@ static inline uint32_t do_set_elem_ntotal(set_elem_item *elem)
     return sizeof(set_elem_item) + elem->nbytes;
 }
 
-static inline bool is_leaf_node(set_hash_node *node)
-{
-    for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
-        if (node->hcnt[hidx] == -1)
-            return false;
-    }
-    return true;
-}
+
 
 static ENGINE_ERROR_CODE do_set_item_find(const void *key, const uint32_t nkey,
                                           bool do_update, hash_item **item)
@@ -192,11 +185,6 @@ static set_hash_node *do_set_node_alloc(uint8_t hash_depth, const void *cookie)
     return do_htree_node_alloc(hash_depth, cookie);
 }
 
-static void do_set_node_free(set_hash_node *node)
-{
-    do_htree_node_free(node);
-}
-
 static set_elem_item *do_set_elem_alloc(const uint32_t nbytes, const void *cookie)
 {
     size_t ntotal = sizeof(set_elem_item) + nbytes;
@@ -235,77 +223,21 @@ static void do_set_node_link(set_meta_info *info,
                              set_hash_node *par_node, const int par_hidx,
                              set_hash_node *node)
 {
-    if (par_node == NULL) {
-        info->root = node;
-    } else {
-        set_elem_item *elem;
-        while (par_node->htab[par_hidx] != NULL) {
-            elem = par_node->htab[par_hidx];
-            par_node->htab[par_hidx] = elem->next;
+    do_htree_node_link(&info->root, par_node, par_hidx, node);
 
-            int hidx = HTREE_GET_HASHIDX(elem->hval, node->hdepth);
-            elem->next = node->htab[hidx];
-            node->htab[hidx] = elem;
-            node->hcnt[hidx] += 1;
-            node->tot_elem_cnt += 1;
-        }
-        assert(node->tot_elem_cnt == par_node->hcnt[par_hidx]);
-        par_node->htab[par_hidx] = node;
-        par_node->hcnt[par_hidx] = -1; /* child hash node */
-    }
-
-    if (1) { /* apply memory space */
-        size_t stotal = slabs_space_size(sizeof(set_hash_node));
-        do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
-    }
+    size_t stotal = slabs_space_size(sizeof(set_hash_node));
+    do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
 }
 
 static void do_set_node_unlink(set_meta_info *info,
                                set_hash_node *par_node, const int par_hidx)
 {
-    set_hash_node *node;
+    do_htree_node_unlink(&info->root, par_node, par_hidx);
 
-    if (par_node == NULL) {
-        node = info->root;
-        info->root = NULL;
-        assert(node->tot_elem_cnt == 0);
-    } else {
-        assert(par_node->hcnt[par_hidx] == -1); /* child hash node */
-        set_elem_item *head = NULL;
-        set_elem_item *elem;
-        int hidx, fcnt = 0;
-
-        node = (set_hash_node *)par_node->htab[par_hidx];
-
-        for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
-            assert(node->hcnt[hidx] >= 0);
-            if (node->hcnt[hidx] > 0) {
-                fcnt += node->hcnt[hidx];
-                while (node->htab[hidx] != NULL) {
-                    elem = node->htab[hidx];
-                    node->htab[hidx] = elem->next;
-                    node->hcnt[hidx] -= 1;
-
-                    elem->next = head;
-                    head = elem;
-                }
-                assert(node->hcnt[hidx] == 0);
-            }
-        }
-        assert(fcnt == node->tot_elem_cnt);
-        node->tot_elem_cnt = 0;
-
-        par_node->htab[par_hidx] = head;
-        par_node->hcnt[par_hidx] = fcnt;
-    }
-
-    if (info->stotal > 0) { /* apply memory space */
+    if (info->stotal > 0) {
         size_t stotal = slabs_space_size(sizeof(set_hash_node));
         do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
     }
-
-    /* free the node */
-    do_set_node_free(node);
 }
 
 static ENGINE_ERROR_CODE do_set_elem_link(set_meta_info *info, set_elem_item *elem,
@@ -432,7 +364,7 @@ static ENGINE_ERROR_CODE do_set_elem_traverse_delete(set_meta_info *info, set_ha
         ret = do_set_elem_traverse_delete(info, child_node, hval, val, vlen);
         if (ret == ENGINE_SUCCESS) {
             if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2)
-                && is_leaf_node(child_node)) {
+                && do_htree_node_is_leaf(child_node)) {
                 do_set_node_unlink(info, node, hidx);
             }
             node->tot_elem_cnt -= 1;
@@ -493,7 +425,7 @@ static int do_set_elem_traverse_dfs(set_meta_info *info, set_hash_node *node,
             fcnt += ecnt;
             if (delete) {
                 if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2)
-                    && is_leaf_node(child_node)) {
+                    && do_htree_node_is_leaf(child_node)) {
                     do_set_node_unlink(info, node, hidx);
                 }
                 node->tot_elem_cnt -= ecnt;
@@ -563,7 +495,7 @@ static set_elem_item *do_set_elem_at_offset(set_meta_info *info, set_hash_node *
             set_elem_item *found = do_set_elem_at_offset(info, child_node, offset, delete);
             if (delete) {
                 if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2)
-                    && is_leaf_node(child_node)) {
+                    && do_htree_node_is_leaf(child_node)) {
                     do_set_node_unlink(info, node, hidx);
                 }
                 node->tot_elem_cnt -= 1;

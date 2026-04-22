@@ -178,6 +178,15 @@ typedef struct _list_elem_item {
     char     value[];             /**< the data itself */
 } list_elem_item;
 
+/* common hash tree element header (set_elem_item and map_elem_item are layout-compatible) */
+typedef struct _htree_elem_item {
+    uint16_t refcount;
+    uint8_t  slabs_clsid;
+    uint8_t  status;
+    uint32_t hval;
+    struct _htree_elem_item *next;
+} htree_elem_item;
+
 /* set element */
 typedef struct _set_elem_item {
     uint16_t refcount;
