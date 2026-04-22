@@ -187,23 +187,25 @@ static void do_set_node_unlink(set_meta_info *info,
     }
 }
 
+static void set_node_on_insert(void *ctx)
+{
+    set_meta_info *info = (set_meta_info *)ctx;
+    size_t stotal = slabs_space_size(sizeof(set_hash_node));
+    do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
+}
+
 static ENGINE_ERROR_CODE do_set_elem_link(set_meta_info *info, set_elem_item *elem,
                                           const void *cookie)
 {
     assert(info->root != NULL);
-    bool node_split;
     ENGINE_ERROR_CODE ret;
 
     ret = do_htree_elem_insert(&info->root, (htree_elem_item *)elem,
-                             elem->data, elem->nbytes,
-                             false, NULL, &node_split, cookie);
+                            elem->data, elem->nbytes,
+                            false, NULL, set_node_on_insert, info, cookie);
     if (ret != ENGINE_SUCCESS)
         return ret;
 
-    if (node_split) {
-        size_t stotal = slabs_space_size(sizeof(set_hash_node));
-        do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
-    }
     info->ccnt++;
     size_t stotal = slabs_space_size(do_htree_elem_ntotal(elem));
     do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);

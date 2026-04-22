@@ -53,6 +53,11 @@ typedef void (*htree_elem_delete_cb)(htree_elem_item *elem,
 
 typedef void (*htree_node_remove_cb)(void *ctx);
 
+typedef void (*htree_elem_replace_cb)(htree_elem_item *old_elem,
+                                      htree_elem_item *new_elem, void *ctx);
+
+typedef void (*htree_node_insert_cb)(void *ctx);
+
 int               do_htree_traverse_sampling(htree_hash_node *node,
                                              uint32_t remain, const uint32_t count,
                                              htree_elem_item **elem_array);
@@ -60,14 +65,14 @@ int               do_htree_traverse_sampling(htree_hash_node *node,
 htree_elem_item  *do_htree_elem_at_offset(htree_hash_node **root,
                                           htree_hash_node *node,
                                           uint32_t offset, const bool delete,
-                                          htree_elem_delete_cb on_delete,
+                                          htree_elem_delete_cb on_elem_delete,
                                           htree_node_remove_cb on_node_remove, void *ctx);
 
 int               do_htree_traverse_dfs_bycnt(htree_hash_node **root,
                                               htree_hash_node *node,
                                               const uint32_t count, const bool delete,
                                               htree_elem_item **elem_array,
-                                              htree_elem_delete_cb on_delete,
+                                              htree_elem_delete_cb on_elem_delete,
                                               htree_node_remove_cb on_node_remove,
                                               enum elem_delete_cause cause, void *ctx);
 
@@ -77,23 +82,23 @@ bool              do_htree_traverse_dfs_byfield(htree_hash_node **root,
                                                const void *key, const size_t klen,
                                                const bool delete,
                                                htree_elem_item **elem_array,
-                                               htree_elem_delete_cb on_delete,
+                                               htree_elem_delete_cb on_elem_delete,
                                                htree_node_remove_cb on_node_remove,
                                                void *ctx);
 
-void              do_htree_elem_remove(htree_hash_node *node, const int hidx,
+void              do_htree_elem_delete(htree_hash_node *node, const int hidx,
                                        htree_elem_item *prev, htree_elem_item *elem);
 
 htree_elem_item  *do_htree_elem_find(htree_hash_node *root,
                                      const void *key, size_t klen,
                                      htree_prev_info *pinfo);
-                                     
+
 ENGINE_ERROR_CODE do_htree_elem_insert(htree_hash_node **root,
-                                     htree_elem_item *elem,
-                                     const void *key, size_t klen,
-                                     bool replace_if_exist,
-                                     htree_elem_item **old_elem,
-                                     bool *node_split,
-                                     const void *cookie);
+                                    htree_elem_item *elem,
+                                    const void *key, size_t klen,
+                                    bool replace_if_exist,
+                                    htree_elem_replace_cb on_elem_replace,
+                                    htree_node_insert_cb on_node_insert,
+                                    void *ctx, const void *cookie);
 
 #endif /* HASH_TREE_H */
