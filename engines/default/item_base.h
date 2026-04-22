@@ -185,30 +185,17 @@ typedef struct _htree_elem_item {
     uint8_t  status;
     uint32_t hval;
     struct _htree_elem_item *next;
+    uint8_t  nfield;              /* key size in data[]: 0 for set/sorted_set (value-only key) */
+    uint8_t  reserved;
+    uint16_t nbytes;              /* value size in data[] */
+    unsigned char data[];         /* data: <key(nfield bytes), value(nbytes bytes)> */
 } htree_elem_item;
 
 /* set element */
-typedef struct _set_elem_item {
-    uint16_t refcount;
-    uint8_t  slabs_clsid;         /* which slab class we're in */
-    uint8_t  status;              /* element lifecycle state: linked(in-set) or unlinked(removed but referenced) */
-    uint32_t hval;                /* hash value */
-    struct _set_elem_item *next;  /* hash chain next */
-    uint32_t nbytes;              /**< The total size of the data (in bytes) */
-    char     value[];             /**< the data itself */
-} set_elem_item;
+typedef htree_elem_item set_elem_item;
 
 /* map element */
-typedef struct _map_elem_item {
-    uint16_t refcount;
-    uint8_t  slabs_clsid;         /* which slab class we're in */
-    uint8_t  status;              /* element lifecycle state: linked(in-map) or unlinked(removed but referenced) */
-    uint32_t hval;                /* hash value */
-    struct _map_elem_item *next;  /* hash chain next */
-    uint8_t nfield;               /**< The total size of the field (in bytes) */
-    uint16_t nbytes;              /**< The total size of the data (in bytes) */
-    unsigned char data[];         /* data: <field, value> */
-} map_elem_item;
+typedef htree_elem_item map_elem_item;
 
 /* btree element */
 typedef struct _btree_elem_item {

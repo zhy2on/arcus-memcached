@@ -105,8 +105,7 @@ static bool hash_insert(hash_table *ht, int key)
 
 static bool set_elem_match(const htree_elem_item *elem, const void *key, size_t klen)
 {
-    set_elem_item *se = (set_elem_item *)elem;
-    return (se->nbytes == klen && memcmp(se->value, key, klen) == 0);
+    return (elem->nbytes == klen && memcmp(elem->data, key, klen) == 0);
 }
 
 static inline uint32_t do_set_elem_ntotal(set_elem_item *elem)
@@ -243,7 +242,7 @@ static ENGINE_ERROR_CODE do_set_elem_link(set_meta_info *info, set_elem_item *el
     ENGINE_ERROR_CODE ret;
 
     ret = do_htree_elem_link(&info->root, (htree_elem_item *)elem,
-                             elem->value, elem->nbytes,
+                             elem->data, elem->nbytes,
                              set_elem_match, false, NULL, &node_split, cookie);
     if (ret != ENGINE_SUCCESS)
         return ret;
@@ -1005,7 +1004,7 @@ ENGINE_ERROR_CODE set_apply_elem_insert(void *engine, hash_item *it,
                         " element alloc failed. nbytes=%d\n", nbytes);
             ret = ENGINE_ENOMEM; break;
         }
-        memcpy(elem->value, value, nbytes);
+        memcpy(elem->data, value, nbytes);
 
         ret = do_set_elem_insert(it, elem, NULL);
         if (ret != ENGINE_SUCCESS) {

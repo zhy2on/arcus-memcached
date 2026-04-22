@@ -58,8 +58,7 @@ static inline void UNLOCK_CACHE(void)
  */
 static bool map_elem_match(const htree_elem_item *elem, const void *key, size_t klen)
 {
-    map_elem_item *me = (map_elem_item *)elem;
-    return (me->nfield == klen && memcmp(me->data, key, klen) == 0);
+    return (elem->nfield == klen && memcmp(elem->data, key, klen) == 0);
 }
 
 static inline uint32_t do_map_elem_ntotal(map_elem_item *elem)
