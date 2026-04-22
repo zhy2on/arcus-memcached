@@ -266,7 +266,6 @@ ENGINE_ERROR_CODE do_htree_elem_insert(htree_hash_node **root,
     return ENGINE_SUCCESS;
 }
 
-
 int do_htree_traverse_sampling(htree_hash_node *node,
                                uint32_t remain, const uint32_t count,
                                htree_elem_item **elem_array)
