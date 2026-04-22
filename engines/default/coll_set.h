@@ -52,8 +52,7 @@ ENGINE_ERROR_CODE set_elem_get(const char *key, const uint32_t nkey,
                                struct elems_result *eresult,
                                const void *cookie);
 
-uint32_t do_set_elem_delete(set_meta_info *info, const uint32_t count,
-                            enum elem_delete_cause cause);
+uint32_t set_elem_delete_with_count(set_meta_info *info, const uint32_t count);
 
 void set_elem_get_all(set_meta_info *info, elems_result_t *eresult);
 

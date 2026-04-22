@@ -54,8 +54,7 @@ ENGINE_ERROR_CODE map_elem_get(const char *key, const uint32_t nkey,
                                struct elems_result *eresult,
                                const void *cookie);
 
-uint32_t do_map_elem_delete(map_meta_info *info, const uint32_t count,
-                            enum elem_delete_cause cause);
+uint32_t map_elem_delete_with_count(map_meta_info *info, const uint32_t count);
 
 void map_elem_get_all(map_meta_info *info, elems_result_t *eresult);
 

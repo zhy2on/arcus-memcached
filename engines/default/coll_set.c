@@ -168,7 +168,7 @@ static void do_set_node_link(set_meta_info *info,
                              set_hash_node *par_node, const int par_hidx,
                              set_hash_node *node)
 {
-    do_htree_node_insert(&info->root, par_node, par_hidx, node);
+    htree_node_insert(&info->root, par_node, par_hidx, node);
 
     size_t stotal = slabs_space_size(sizeof(set_hash_node));
     do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
@@ -177,7 +177,7 @@ static void do_set_node_link(set_meta_info *info,
 static void do_set_node_unlink(set_meta_info *info,
                                set_hash_node *par_node, const int par_hidx)
 {
-    do_htree_node_remove(&info->root, par_node, par_hidx);
+    htree_node_remove(&info->root, par_node, par_hidx);
 
     if (info->stotal > 0) {
         size_t stotal = slabs_space_size(sizeof(set_hash_node));
@@ -189,7 +189,7 @@ static void set_elem_on_insert(htree_elem_item *elem, void *ctx)
 {
     set_meta_info *info = (set_meta_info *)ctx;
     info->ccnt++;
-    size_t stotal = slabs_space_size(do_htree_elem_ntotal(elem));
+    size_t stotal = slabs_space_size(htree_elem_ntotal(elem));
     do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
 }
 
@@ -204,7 +204,7 @@ static ENGINE_ERROR_CODE do_set_elem_link(set_meta_info *info, set_elem_item *el
                                           const void *cookie)
 {
     assert(info->root != NULL);
-    return do_htree_elem_insert(&info->root, (htree_elem_item *)elem,
+    return htree_elem_insert(&info->root, (htree_elem_item *)elem,
                                 elem->data, elem->nbytes,
                                 false, NULL, NULL,
                                 set_elem_on_insert, NULL,
@@ -220,12 +220,12 @@ static void set_elem_on_delete(htree_elem_item *elem,
     CLOG_SET_ELEM_DELETE(info, elem, cause);
 
     if (info->stotal > 0) {
-        size_t stotal = slabs_space_size(do_htree_elem_ntotal(elem));
+        size_t stotal = slabs_space_size(htree_elem_ntotal(elem));
         do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
     }
 
     if (elem->refcount == 0) {
-        do_htree_elem_free(elem);
+        htree_elem_free(elem);
     }
 }
 
@@ -245,7 +245,7 @@ static ENGINE_ERROR_CODE do_set_elem_delete_with_value(set_meta_info *info,
     assert(cause == ELEM_DELETE_NORMAL);
     if (info->root == NULL) return ENGINE_ELEM_ENOENT;
 
-    bool found = do_htree_traverse_dfs_byfield(&info->root, info->root,
+    bool found = htree_traverse_dfs_byfield(&info->root, info->root,
                                                val, vlen, true, NULL,
                                                set_elem_on_delete, set_node_on_remove, info);
     if (found && info->root->tot_elem_cnt == 0) {
@@ -254,19 +254,24 @@ static ENGINE_ERROR_CODE do_set_elem_delete_with_value(set_meta_info *info,
     return found ? ENGINE_SUCCESS : ENGINE_ELEM_ENOENT;
 }
 
-uint32_t do_set_elem_delete(set_meta_info *info, const uint32_t count,
+static uint32_t do_set_elem_delete(set_meta_info *info, const uint32_t count,
                                    enum elem_delete_cause cause)
 {
     assert(cause == ELEM_DELETE_COLL);
     uint32_t fcnt = 0;
     if (info->root != NULL) {
-        fcnt = do_htree_traverse_dfs_bycnt(&info->root, info->root, count, true, NULL,
+        fcnt = htree_traverse_dfs_bycnt(&info->root, info->root, count, true, NULL,
                                            set_elem_on_delete, set_node_on_remove, cause, info);
         if (info->root->tot_elem_cnt == 0) {
             do_set_node_unlink(info, NULL, 0);
         }
     }
     return fcnt;
+}
+
+uint32_t set_elem_delete_with_count(set_meta_info *info, const uint32_t count)
+{
+    return do_set_elem_delete(info, count, ELEM_DELETE_COLL);
 }
 
 static uint32_t do_set_elem_traverse_rand(set_meta_info *info,
@@ -279,7 +284,7 @@ static uint32_t do_set_elem_traverse_rand(set_meta_info *info,
         while (fcnt < count) {
             int rand_offset = (rand() % info->ccnt);
             set_elem_item *found = (set_elem_item *)
-                do_htree_elem_at_offset(&info->root, info->root, rand_offset, delete,
+                htree_elem_at_offset(&info->root, info->root, rand_offset, delete,
                                         set_elem_on_delete, set_node_on_remove, info);
             assert(found != NULL);
             elem_array[fcnt++] = found;
@@ -292,7 +297,7 @@ static uint32_t do_set_elem_traverse_rand(set_meta_info *info,
             int rand_offset = (rand() % info->ccnt);
             if (hash_insert(&offset_ht, rand_offset)) {
                 set_elem_item *found = (set_elem_item *)
-                    do_htree_elem_at_offset(&info->root, info->root, rand_offset, delete,
+                    htree_elem_at_offset(&info->root, info->root, rand_offset, delete,
                                             NULL, NULL, NULL);
                 assert(found != NULL);
                 elem_array[fcnt++] = found;
@@ -300,7 +305,7 @@ static uint32_t do_set_elem_traverse_rand(set_meta_info *info,
         }
         hash_free(&offset_ht);
     } else { /* Use sampling */
-        fcnt = do_htree_traverse_sampling(info->root, info->ccnt,
+        fcnt = htree_traverse_sampling(info->root, info->ccnt,
                                           count, (htree_elem_item **)elem_array);
         for (int i = fcnt - 1; i > 0; i--) {
             int rand_idx = rand() % (i + 1);
@@ -325,7 +330,7 @@ static uint32_t do_set_elem_get(set_meta_info *info,
         CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, count, ELEM_DELETE_NORMAL);
     }
     if (count >= info->ccnt || count == 0) { /* Return all */
-        fcnt = do_htree_traverse_dfs_bycnt(&info->root, info->root, count, delete, elem_array,
+        fcnt = htree_traverse_dfs_bycnt(&info->root, info->root, count, delete, elem_array,
                                            (delete ? set_elem_on_delete : NULL),
                                            (delete ? set_node_on_remove : NULL),
                                            ELEM_DELETE_NORMAL, info);
@@ -365,7 +370,7 @@ static ENGINE_ERROR_CODE do_set_elem_insert(hash_item *it, set_elem_item *elem,
     /* create the root hash node if it does not exist */
     bool new_root_flag = false;
     if (info->root == NULL) { /* empty set */
-        set_hash_node *r_node = do_htree_node_alloc(0, cookie);
+        set_hash_node *r_node = htree_node_alloc(0, cookie);
         if (r_node == NULL) {
             return ENGINE_ENOMEM;
         }
@@ -420,7 +425,7 @@ set_elem_item *set_elem_alloc(const uint32_t nbytes, const void *cookie)
 {
     set_elem_item *elem;
     LOCK_CACHE();
-    elem = do_htree_elem_alloc(0, (uint16_t)nbytes, cookie);
+    elem = htree_elem_alloc(0, (uint16_t)nbytes, cookie);
     UNLOCK_CACHE();
     return elem;
 }
@@ -429,7 +434,7 @@ void set_elem_free(set_elem_item *elem)
 {
     LOCK_CACHE();
     assert(elem->status == ELEM_STATUS_UNLINKED);
-    do_htree_elem_free(elem);
+    htree_elem_free(elem);
     UNLOCK_CACHE();
 }
 
@@ -438,7 +443,7 @@ void set_elem_release(set_elem_item **elem_array, const int elem_count)
     int cnt = 0;
     LOCK_CACHE();
     while (cnt < elem_count) {
-        do_htree_elem_release(elem_array[cnt++]);
+        htree_elem_release(elem_array[cnt++]);
         if ((cnt % 100) == 0 && cnt < elem_count) {
             UNLOCK_CACHE();
             LOCK_CACHE();
@@ -532,7 +537,7 @@ ENGINE_ERROR_CODE set_elem_exist(const char *key, const uint32_t nkey,
             if ((info->mflags & COLL_META_FLAG_READABLE) == 0) {
                 ret = ENGINE_UNREADABLE; break;
             }
-            if (do_htree_elem_find(info->root, value, nbytes, NULL) != NULL)
+            if (htree_elem_find(info->root, value, nbytes, NULL) != NULL)
                 *exist = true;
             else
                 *exist = false;
@@ -789,7 +794,7 @@ ENGINE_ERROR_CODE set_apply_elem_insert(void *engine, hash_item *it,
             ret = ENGINE_KEY_ENOENT; break;
         }
 
-        elem = do_htree_elem_alloc(0, (uint16_t)nbytes, NULL);
+        elem = htree_elem_alloc(0, (uint16_t)nbytes, NULL);
         if (elem == NULL) {
             logger->log(EXTENSION_LOG_WARNING, NULL, "set_apply_elem_insert failed."
                         " element alloc failed. nbytes=%d\n", nbytes);
@@ -799,7 +804,7 @@ ENGINE_ERROR_CODE set_apply_elem_insert(void *engine, hash_item *it,
 
         ret = do_set_elem_insert(it, elem, NULL);
         if (ret != ENGINE_SUCCESS) {
-            do_htree_elem_free(elem);
+            htree_elem_free(elem);
             logger->log(EXTENSION_LOG_WARNING, NULL, "set_apply_elem_insert failed."
                         " key=%.*s nkey=%u code=%d\n",
                         PRINT_NKEY(it->nkey), key, it->nkey, ret);

@@ -122,7 +122,7 @@ static void do_map_node_link(map_meta_info *info,
                              map_hash_node *par_node, const int par_hidx,
                              map_hash_node *node)
 {
-    do_htree_node_insert(&info->root, par_node, par_hidx, node);
+    htree_node_insert(&info->root, par_node, par_hidx, node);
 
     size_t stotal = slabs_space_size(sizeof(map_hash_node));
     do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, stotal);
@@ -131,7 +131,7 @@ static void do_map_node_link(map_meta_info *info,
 static void do_map_node_unlink(map_meta_info *info,
                                map_hash_node *par_node, const int par_hidx)
 {
-    do_htree_node_remove(&info->root, par_node, par_hidx);
+    htree_node_remove(&info->root, par_node, par_hidx);
 
     if (info->stotal > 0) {
         size_t stotal = slabs_space_size(sizeof(map_hash_node));
@@ -149,7 +149,7 @@ static void map_elem_on_insert(htree_elem_item *elem, void *ctx)
     map_meta_info *info = ((map_elem_link_ctx *)ctx)->info;
     CLOG_MAP_ELEM_INSERT(info, NULL, (map_elem_item *)elem);
     info->ccnt++;
-    size_t stotal = slabs_space_size(do_htree_elem_ntotal(elem));
+    size_t stotal = slabs_space_size(htree_elem_ntotal(elem));
     do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, stotal);
 }
 
@@ -163,8 +163,8 @@ static void map_elem_on_replace(htree_elem_item *old_htree, htree_elem_item *new
 
     CLOG_MAP_ELEM_INSERT(info, old_elem, new_elem);
 
-    size_t old_stotal = slabs_space_size(do_htree_elem_ntotal(old_htree));
-    size_t new_stotal = slabs_space_size(do_htree_elem_ntotal(new_htree));
+    size_t old_stotal = slabs_space_size(htree_elem_ntotal(old_htree));
+    size_t new_stotal = slabs_space_size(htree_elem_ntotal(new_htree));
     if (new_stotal != old_stotal) {
         assert(info->stotal > 0);
         if (new_stotal > old_stotal)
@@ -174,7 +174,7 @@ static void map_elem_on_replace(htree_elem_item *old_htree, htree_elem_item *new
     }
 
     if (old_elem->refcount == 0)
-        do_htree_elem_free(old_htree);
+        htree_elem_free(old_htree);
 }
 
 static ENGINE_ERROR_CODE map_on_pre_replace(htree_elem_item *old_htree,
@@ -220,7 +220,7 @@ static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *el
 {
     assert(info->root != NULL);
     map_elem_link_ctx lctx = { info, replaced };
-    return do_htree_elem_insert(&info->root, (htree_elem_item *)elem,
+    return htree_elem_insert(&info->root, (htree_elem_item *)elem,
                                 elem->data, elem->nfield,
                                 replace_if_exist,
                                 map_on_pre_replace, map_on_pre_insert,
@@ -237,12 +237,12 @@ static void map_elem_on_delete(htree_elem_item *elem,
     CLOG_MAP_ELEM_DELETE(info, elem, cause);
 
     if (info->stotal > 0) {
-        size_t stotal = slabs_space_size(do_htree_elem_ntotal(elem));
+        size_t stotal = slabs_space_size(htree_elem_ntotal(elem));
         do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, stotal);
     }
 
     if (elem->refcount == 0) {
-        do_htree_elem_free(elem);
+        htree_elem_free(elem);
     }
 }
 
@@ -264,11 +264,11 @@ static uint32_t do_map_elem_delete_with_field(map_meta_info *info, const int num
     if (info->root != NULL) {
         CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, numfields, cause);
         if (numfields == 0) {
-            delcnt = do_htree_traverse_dfs_bycnt(&info->root, info->root, 0, true, NULL,
+            delcnt = htree_traverse_dfs_bycnt(&info->root, info->root, 0, true, NULL,
                                                  map_elem_on_delete, map_node_on_remove, cause, info);
         } else {
             for (int ii = 0; ii < numfields; ii++) {
-                if (do_htree_traverse_dfs_byfield(&info->root, info->root,
+                if (htree_traverse_dfs_byfield(&info->root, info->root,
                                                   flist[ii].value, flist[ii].length,
                                                   true, NULL, map_elem_on_delete, map_node_on_remove, info)) {
                     delcnt++;
@@ -290,7 +290,7 @@ static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
     htree_prev_info pinfo;
     map_elem_item *elem;
 
-    elem = (map_elem_item *)do_htree_elem_find(info->root, field->value, field->length, &pinfo);
+    elem = (map_elem_item *)htree_elem_find(info->root, field->value, field->length, &pinfo);
     if (elem == NULL) {
         return ENGINE_ELEM_ENOENT;
     }
@@ -306,7 +306,7 @@ static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
                 return ENGINE_ENOMEM;
         }
 #endif
-        map_elem_item *new_elem = do_htree_elem_alloc((uint8_t)elem->nfield, (uint16_t)nbytes, cookie);
+        map_elem_item *new_elem = htree_elem_alloc((uint8_t)elem->nfield, (uint16_t)nbytes, cookie);
         if (new_elem == NULL) {
             return ENGINE_ENOMEM;
         }
@@ -329,19 +329,24 @@ static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
     return ENGINE_SUCCESS;
 }
 
-uint32_t do_map_elem_delete(map_meta_info *info, const uint32_t count,
+static uint32_t do_map_elem_delete(map_meta_info *info, const uint32_t count,
                                    enum elem_delete_cause cause)
 {
     assert(cause == ELEM_DELETE_COLL);
     uint32_t fcnt = 0;
     if (info->root != NULL) {
-        fcnt = do_htree_traverse_dfs_bycnt(&info->root, info->root, count, true, NULL,
+        fcnt = htree_traverse_dfs_bycnt(&info->root, info->root, count, true, NULL,
                                            map_elem_on_delete, map_node_on_remove, cause, info);
         if (info->root->tot_elem_cnt == 0) {
             do_map_node_unlink(info, NULL, 0);
         }
     }
     return fcnt;
+}
+
+uint32_t map_elem_delete_with_count(map_meta_info *info, const uint32_t count)
+{
+    return do_map_elem_delete(info, count, ELEM_DELETE_COLL);
 }
 
 static uint32_t do_map_elem_get(map_meta_info *info,
@@ -355,14 +360,14 @@ static uint32_t do_map_elem_get(map_meta_info *info,
         CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, numfields, ELEM_DELETE_NORMAL);
     }
     if (numfields == 0) {
-        fcnt = do_htree_traverse_dfs_bycnt(&info->root, info->root, 0, delete,
+        fcnt = htree_traverse_dfs_bycnt(&info->root, info->root, 0, delete,
                                            elem_array,
                                            (delete ? map_elem_on_delete : NULL),
                                            (delete ? map_node_on_remove : NULL),
                                            ELEM_DELETE_NORMAL, info);
     } else {
         for (int ii = 0; ii < numfields; ii++) {
-            if (do_htree_traverse_dfs_byfield(&info->root, info->root,
+            if (htree_traverse_dfs_byfield(&info->root, info->root,
                                               flist[ii].value, flist[ii].length,
                                               delete, &elem_array[fcnt],
                                               (delete ? map_elem_on_delete : NULL),
@@ -390,7 +395,7 @@ static ENGINE_ERROR_CODE do_map_elem_insert(hash_item *it, map_elem_item *elem,
     /* create the root hash node if it does not exist */
     bool new_root_flag = false;
     if (info->root == NULL) { /* empty map */
-        map_hash_node *r_node = do_htree_node_alloc(0, cookie);
+        map_hash_node *r_node = htree_node_alloc(0, cookie);
         if (r_node == NULL) {
             return ENGINE_ENOMEM;
         }
@@ -444,7 +449,7 @@ map_elem_item *map_elem_alloc(const int nfield, const uint32_t nbytes, const voi
 {
     map_elem_item *elem;
     LOCK_CACHE();
-    elem = do_htree_elem_alloc((uint8_t)nfield, (uint16_t)nbytes, cookie);
+    elem = htree_elem_alloc((uint8_t)nfield, (uint16_t)nbytes, cookie);
     UNLOCK_CACHE();
     return elem;
 }
@@ -453,7 +458,7 @@ void map_elem_free(map_elem_item *elem)
 {
     LOCK_CACHE();
     assert(elem->status == ELEM_STATUS_UNLINKED);
-    do_htree_elem_free(elem);
+    htree_elem_free(elem);
     UNLOCK_CACHE();
 }
 
@@ -462,7 +467,7 @@ void map_elem_release(map_elem_item **elem_array, const int elem_count)
     int cnt = 0;
     LOCK_CACHE();
     while (cnt < elem_count) {
-        do_htree_elem_release(elem_array[cnt++]);
+        htree_elem_release(elem_array[cnt++]);
         if ((cnt % 100) == 0 && cnt < elem_count) {
             UNLOCK_CACHE();
             LOCK_CACHE();
@@ -814,7 +819,7 @@ ENGINE_ERROR_CODE map_apply_elem_insert(void *engine, hash_item *it,
             ret = ENGINE_KEY_ENOENT; break;
         }
 
-        elem = do_htree_elem_alloc((uint8_t)nfield, (uint16_t)nbytes, NULL);
+        elem = htree_elem_alloc((uint8_t)nfield, (uint16_t)nbytes, NULL);
         if (elem == NULL) {
             logger->log(EXTENSION_LOG_WARNING, NULL, "map_apply_elem_insert failed."
                         " element alloc failed. nfield=%d nbytes=%d\n", nfield, nbytes);
@@ -824,7 +829,7 @@ ENGINE_ERROR_CODE map_apply_elem_insert(void *engine, hash_item *it,
 
         ret = do_map_elem_insert(it, elem, true /* replace_if_exist */, &replaced, NULL);
         if (ret != ENGINE_SUCCESS) {
-            do_htree_elem_free(elem);
+            htree_elem_free(elem);
             logger->log(EXTENSION_LOG_WARNING, NULL, "map_apply_elem_insert failed."
                         " key=%.*s nkey=%u field=%.*s nfield=%u code=%d\n",
                         PRINT_NKEY(it->nkey), key, it->nkey, nfield, field, nfield, ret);
