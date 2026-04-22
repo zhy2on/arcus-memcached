@@ -228,10 +228,6 @@ static void set_elem_on_delete(htree_elem_item *elem,
     }
 }
 
-static set_elem_item *do_set_elem_find(set_meta_info *info, const char *val, const int vlen)
-{
-    return (set_elem_item *)do_htree_elem_find(info->root, val, vlen, NULL);
-}
 
 static ENGINE_ERROR_CODE do_set_elem_delete_with_value(set_meta_info *info,
                                                        const char *val, const int vlen,
@@ -527,7 +523,7 @@ ENGINE_ERROR_CODE set_elem_exist(const char *key, const uint32_t nkey,
             if ((info->mflags & COLL_META_FLAG_READABLE) == 0) {
                 ret = ENGINE_UNREADABLE; break;
             }
-            if (do_set_elem_find(info, value, nbytes) != NULL)
+            if (do_htree_elem_find(info->root, value, nbytes, NULL) != NULL)
                 *exist = true;
             else
                 *exist = false;
