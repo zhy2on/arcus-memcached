@@ -206,7 +206,8 @@ static ENGINE_ERROR_CODE do_set_elem_link(set_meta_info *info, set_elem_item *el
     assert(info->root != NULL);
     return do_htree_elem_insert(&info->root, (htree_elem_item *)elem,
                                 elem->data, elem->nbytes,
-                                false, set_elem_on_insert, NULL,
+                                false, NULL, NULL,
+                                set_elem_on_insert, NULL,
                                 set_node_on_insert, info, cookie);
 }
 

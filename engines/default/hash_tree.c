@@ -188,6 +188,8 @@ ENGINE_ERROR_CODE do_htree_elem_insert(htree_hash_node **root,
                                     htree_elem_item *elem,
                                     const void *key, size_t klen,
                                     bool replace_if_exist,
+                                    htree_pre_replace_cb on_pre_replace,
+                                    htree_pre_insert_cb on_pre_insert,
                                     htree_elem_insert_cb on_elem_insert,
                                     htree_elem_replace_cb on_elem_replace,
                                     htree_node_insert_cb on_node_insert,
@@ -216,6 +218,10 @@ ENGINE_ERROR_CODE do_htree_elem_insert(htree_hash_node **root,
     if (find != NULL) {
         if (!replace_if_exist)
             return ENGINE_ELEM_EEXISTS;
+        if (on_pre_replace) {
+            ENGINE_ERROR_CODE ret = on_pre_replace(find, elem, ctx);
+            if (ret != ENGINE_SUCCESS) return ret;
+        }
         /* replace: swap find out, elem in */
         elem->next = find->next;
         if (prev != NULL) prev->next = elem;
@@ -224,6 +230,11 @@ ENGINE_ERROR_CODE do_htree_elem_insert(htree_hash_node **root,
         find->status = ELEM_STATUS_UNLINKED;
         if (on_elem_replace) on_elem_replace(find, elem, ctx);
         return ENGINE_SUCCESS;
+    }
+
+    if (on_pre_insert) {
+        ENGINE_ERROR_CODE ret = on_pre_insert(elem, ctx);
+        if (ret != ENGINE_SUCCESS) return ret;
     }
 
     if (node->hcnt[hidx] >= HTREE_MAX_HASHCHAIN_SIZE) {

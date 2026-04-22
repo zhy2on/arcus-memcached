@@ -177,6 +177,36 @@ static void map_elem_on_replace(htree_elem_item *old_htree, htree_elem_item *new
         do_htree_elem_free(old_htree);
 }
 
+static ENGINE_ERROR_CODE map_pre_replace(htree_elem_item *old_htree,
+                                         htree_elem_item *new_htree, void *ctx)
+{
+#ifdef ENABLE_STICKY_ITEM
+    map_meta_info *info = ((map_elem_link_ctx *)ctx)->info;
+    if (IS_STICKY_COLLFLG(info)) {
+        map_elem_item *old_elem = (map_elem_item *)old_htree;
+        map_elem_item *new_elem = (map_elem_item *)new_htree;
+        if (old_elem->nbytes < new_elem->nbytes && do_item_sticky_overflowed())
+            return ENGINE_ENOMEM;
+    }
+#endif
+    return ENGINE_SUCCESS;
+}
+
+static ENGINE_ERROR_CODE map_pre_insert(htree_elem_item *new_htree, void *ctx)
+{
+    map_meta_info *info = ((map_elem_link_ctx *)ctx)->info;
+#ifdef ENABLE_STICKY_ITEM
+    if (IS_STICKY_COLLFLG(info)) {
+        if (do_item_sticky_overflowed())
+            return ENGINE_ENOMEM;
+    }
+#endif
+    assert(info->ovflact == OVFL_ERROR);
+    if (info->ccnt >= (info->mcnt > 0 ? info->mcnt : config->max_map_size))
+        return ENGINE_EOVERFLOW;
+    return ENGINE_SUCCESS;
+}
+
 static void map_node_on_insert(void *ctx)
 {
     map_meta_info *info = ((map_elem_link_ctx *)ctx)->info;
@@ -189,42 +219,11 @@ static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *el
                                           const void *cookie)
 {
     assert(info->root != NULL);
-
-#ifdef ENABLE_STICKY_ITEM
-    if (IS_STICKY_COLLFLG(info)) {
-        map_elem_item *find = (map_elem_item *)do_htree_elem_find(info->root,
-                                                                   elem->data, elem->nfield, NULL);
-        if (find != NULL) {
-            if (!replace_if_exist)
-                return ENGINE_ELEM_EEXISTS;
-            if (find->nbytes < elem->nbytes && do_item_sticky_overflowed())
-                return ENGINE_ENOMEM;
-        } else {
-            if (do_item_sticky_overflowed())
-                return ENGINE_ENOMEM;
-        }
-    }
-#endif
-
-    /* overflow check: only on insert (either pure insert or upsert when field doesn't exist) */
-    {
-        bool is_insert;
-        if (!replace_if_exist) {
-            is_insert = true;
-        } else {
-            is_insert = (do_htree_elem_find(info->root, elem->data, elem->nfield, NULL) == NULL);
-        }
-        if (is_insert) {
-            assert(info->ovflact == OVFL_ERROR);
-            if (info->ccnt >= (info->mcnt > 0 ? info->mcnt : config->max_map_size))
-                return ENGINE_EOVERFLOW;
-        }
-    }
-
     map_elem_link_ctx lctx = { info, replaced };
     return do_htree_elem_insert(&info->root, (htree_elem_item *)elem,
                                 elem->data, elem->nfield,
                                 replace_if_exist,
+                                map_pre_replace, map_pre_insert,
                                 map_elem_on_insert, map_elem_on_replace,
                                 map_node_on_insert, &lctx, cookie);
 }
