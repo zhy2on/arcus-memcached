@@ -34,6 +34,10 @@ htree_hash_node  *do_htree_node_alloc(uint8_t hash_depth, const void *cookie);
 void              do_htree_node_free(htree_hash_node *node);
 bool              do_htree_node_is_leaf(const htree_hash_node *node);
 
+uint32_t          do_htree_elem_ntotal(htree_elem_item *elem);
+void              do_htree_elem_free(htree_elem_item *elem);
+void              do_htree_elem_release(htree_elem_item *elem);
+
 void              do_htree_node_link(htree_hash_node **root,
                                      htree_hash_node *par_node, int par_hidx,
                                      htree_hash_node *node);

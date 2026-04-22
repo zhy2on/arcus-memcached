@@ -108,10 +108,7 @@ static bool set_elem_match(const htree_elem_item *elem, const void *key, size_t 
     return (elem->nbytes == klen && memcmp(elem->data, key, klen) == 0);
 }
 
-static inline uint32_t do_set_elem_ntotal(set_elem_item *elem)
-{
-    return sizeof(set_elem_item) + elem->nbytes;
-}
+#define do_set_elem_ntotal(e)  do_htree_elem_ntotal(e)
 
 
 
@@ -195,23 +192,8 @@ static set_elem_item *do_set_elem_alloc(const uint32_t nbytes, const void *cooki
     return elem;
 }
 
-static void do_set_elem_free(set_elem_item *elem)
-{
-    assert(elem->refcount == 0);
-    assert(elem->slabs_clsid != 0);
-    size_t ntotal = do_set_elem_ntotal(elem);
-    do_item_mem_free(elem, ntotal);
-}
-
-static void do_set_elem_release(set_elem_item *elem)
-{
-    if (elem->refcount != 0) {
-        elem->refcount--;
-    }
-    if (elem->refcount == 0 && elem->status == ELEM_STATUS_UNLINKED) {
-        do_set_elem_free(elem);
-    }
-}
+#define do_set_elem_free(e)     do_htree_elem_free(e)
+#define do_set_elem_release(e)  do_htree_elem_release(e)
 
 static void do_set_node_link(set_meta_info *info,
                              set_hash_node *par_node, const int par_hidx,

@@ -48,6 +48,28 @@ void do_htree_node_free(htree_hash_node *node)
     do_item_mem_free(node, sizeof(htree_hash_node));
 }
 
+uint32_t do_htree_elem_ntotal(htree_elem_item *elem)
+{
+    return sizeof(htree_elem_item) + elem->nfield + elem->nbytes;
+}
+
+void do_htree_elem_free(htree_elem_item *elem)
+{
+    assert(elem->refcount == 0);
+    assert(elem->slabs_clsid != 0);
+    do_item_mem_free(elem, do_htree_elem_ntotal(elem));
+}
+
+void do_htree_elem_release(htree_elem_item *elem)
+{
+    if (elem->refcount != 0) {
+        elem->refcount--;
+    }
+    if (elem->refcount == 0 && elem->status == ELEM_STATUS_UNLINKED) {
+        do_htree_elem_free(elem);
+    }
+}
+
 bool do_htree_node_is_leaf(const htree_hash_node *node)
 {
     for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {

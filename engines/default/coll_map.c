@@ -61,10 +61,7 @@ static bool map_elem_match(const htree_elem_item *elem, const void *key, size_t 
     return (elem->nfield == klen && memcmp(elem->data, key, klen) == 0);
 }
 
-static inline uint32_t do_map_elem_ntotal(map_elem_item *elem)
-{
-    return sizeof(map_elem_item) + elem->nfield + elem->nbytes;
-}
+#define do_map_elem_ntotal(e)  do_htree_elem_ntotal(e)
 
 static ENGINE_ERROR_CODE do_map_item_find(const void *key, const uint32_t nkey,
                                           bool do_update, hash_item **item)
@@ -148,23 +145,8 @@ static map_elem_item *do_map_elem_alloc(const int nfield,
     return elem;
 }
 
-static void do_map_elem_free(map_elem_item *elem)
-{
-    assert(elem->refcount == 0);
-    assert(elem->slabs_clsid != 0);
-    size_t ntotal = do_map_elem_ntotal(elem);
-    do_item_mem_free(elem, ntotal);
-}
-
-static void do_map_elem_release(map_elem_item *elem)
-{
-    if (elem->refcount != 0) {
-        elem->refcount--;
-    }
-    if (elem->refcount == 0 && elem->status == ELEM_STATUS_UNLINKED) {
-        do_map_elem_free(elem);
-    }
-}
+#define do_map_elem_free(e)     do_htree_elem_free(e)
+#define do_map_elem_release(e)  do_htree_elem_release(e)
 
 static void do_map_node_link(map_meta_info *info,
                              map_hash_node *par_node, const int par_hidx,
