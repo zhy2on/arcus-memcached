@@ -28,17 +28,23 @@ typedef struct {
 } htree_prev_info;
 
 htree_hash_node  *do_htree_node_alloc(uint8_t hash_depth, const void *cookie);
+
 void              do_htree_node_free(htree_hash_node *node);
+
 bool              do_htree_node_is_leaf(const htree_hash_node *node);
 
 htree_elem_item  *do_htree_elem_alloc(uint8_t nfield, uint16_t nbytes, const void *cookie);
+
 uint32_t          do_htree_elem_ntotal(htree_elem_item *elem);
+
 void              do_htree_elem_free(htree_elem_item *elem);
+
 void              do_htree_elem_release(htree_elem_item *elem);
 
 void              do_htree_node_link(htree_hash_node **root,
                                      htree_hash_node *par_node, int par_hidx,
                                      htree_hash_node *node);
+
 void              do_htree_node_unlink(htree_hash_node **root,
                                        htree_hash_node *par_node, int par_hidx);
 
@@ -52,12 +58,14 @@ htree_elem_item  *do_htree_elem_at_offset(htree_hash_node **root,
                                           htree_hash_node *node,
                                           uint32_t offset, const bool delete,
                                           htree_elem_delete_cb on_delete, void *ctx);
+
 int               do_htree_traverse_dfs_bycnt(htree_hash_node **root,
                                               htree_hash_node *node,
                                               const uint32_t count, const bool delete,
                                               htree_elem_item **elem_array,
                                               htree_elem_delete_cb on_delete,
                                               enum elem_delete_cause cause, void *ctx);
+
 bool              do_htree_traverse_dfs_byfield(htree_hash_node **root,
                                                htree_hash_node *node,
                                                const uint32_t hval,
@@ -66,12 +74,14 @@ bool              do_htree_traverse_dfs_byfield(htree_hash_node **root,
                                                htree_elem_item **elem_array,
                                                htree_elem_delete_cb on_delete,
                                                void *ctx);
+
 void              do_htree_elem_unlink(htree_hash_node *node, const int hidx,
                                        htree_elem_item *prev, htree_elem_item *elem);
 
 htree_elem_item  *do_htree_elem_find(htree_hash_node *root,
                                      const void *key, size_t klen,
                                      htree_prev_info *pinfo);
+                                     
 ENGINE_ERROR_CODE do_htree_elem_link(htree_hash_node **root,
                                      htree_elem_item *elem,
                                      const void *key, size_t klen,

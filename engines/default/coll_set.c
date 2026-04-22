@@ -102,10 +102,6 @@ static bool hash_insert(hash_table *ht, int key)
 /*
  * SET collection manangement
  */
-
-
-
-
 static ENGINE_ERROR_CODE do_set_item_find(const void *key, const uint32_t nkey,
                                           bool do_update, hash_item **item)
 {
@@ -169,7 +165,6 @@ static hash_item *do_set_item_alloc(const void *key, const uint32_t nkey,
     }
     return it;
 }
-
 
 static void do_set_node_link(set_meta_info *info,
                              set_hash_node *par_node, const int par_hidx,
@@ -679,7 +674,6 @@ void set_elem_get_all(set_meta_info *info, elems_result_t *eresult)
     assert(eresult->elem_count == info->ccnt);
 }
 
-
 ENGINE_ERROR_CODE set_coll_getattr(hash_item *it, item_attr *attrp,
                                    ENGINE_ITEM_ATTR *attr_ids, const uint32_t attr_cnt)
 {
@@ -775,7 +769,6 @@ ENGINE_ERROR_CODE set_apply_item_link(void *engine, const char *key, const uint3
     }
     return ret;
 }
-
 
 ENGINE_ERROR_CODE set_apply_elem_insert(void *engine, hash_item *it,
                                         const char *value, const uint32_t nbytes)

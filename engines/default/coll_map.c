@@ -56,8 +56,6 @@ static inline void UNLOCK_CACHE(void)
 /*
  * MAP collection manangement
  */
-
-
 static ENGINE_ERROR_CODE do_map_item_find(const void *key, const uint32_t nkey,
                                           bool do_update, hash_item **item)
 {
@@ -121,7 +119,6 @@ static hash_item *do_map_item_alloc(const void *key, const uint32_t nkey,
     }
     return it;
 }
-
 
 static void do_map_node_link(map_meta_info *info,
                              map_hash_node *par_node, const int par_hidx,
@@ -286,7 +283,6 @@ static void map_elem_on_delete(htree_elem_item *elem,
     }
 }
 
-
 static uint32_t do_map_elem_delete_with_field(map_meta_info *info, const int numfields,
                                               const field_t *flist, enum elem_delete_cause cause)
 {
@@ -315,7 +311,6 @@ static uint32_t do_map_elem_delete_with_field(map_meta_info *info, const int num
     }
     return delcnt;
 }
-
 
 static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
                                             const field_t *field, const char *value,
@@ -734,7 +729,6 @@ void map_elem_get_all(map_meta_info *info, elems_result_t *eresult)
     }
     assert(eresult->elem_count == info->ccnt);
 }
-
 
 ENGINE_ERROR_CODE map_coll_getattr(hash_item *it, item_attr *attrp,
                                    ENGINE_ITEM_ATTR *attr_ids, const uint32_t attr_cnt)
