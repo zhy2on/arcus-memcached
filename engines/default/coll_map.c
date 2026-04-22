@@ -33,6 +33,7 @@
 
 #include "default_engine.h"
 #include "item_clog.h"
+#include "hash_tree.h"
 
 static struct default_engine *engine=NULL;
 static struct engine_config  *config=NULL; // engine config
@@ -149,25 +150,12 @@ static hash_item *do_map_item_alloc(const void *key, const uint32_t nkey,
 
 static map_hash_node *do_map_node_alloc(uint8_t hash_depth, const void *cookie)
 {
-    size_t ntotal = sizeof(map_hash_node);
-
-    map_hash_node *node = do_item_mem_alloc(ntotal, LRU_CLSID_FOR_SMALL, cookie);
-    if (node != NULL) {
-        node->slabs_clsid = slabs_clsid(ntotal);
-        assert(node->slabs_clsid > 0);
-
-        node->refcount     = 0;
-        node->hdepth       = hash_depth;
-        node->tot_elem_cnt = 0;
-        memset(node->hcnt, 0, HTREE_HASHTAB_SIZE*sizeof(uint16_t));
-        memset(node->htab, 0, HTREE_HASHTAB_SIZE*sizeof(void*));
-    }
-    return node;
+    return do_htree_node_alloc(hash_depth, cookie);
 }
 
 static void do_map_node_free(map_hash_node *node)
 {
-    do_item_mem_free(node, sizeof(map_hash_node));
+    do_htree_node_free(node);
 }
 
 static map_elem_item *do_map_elem_alloc(const int nfield,
