@@ -139,11 +139,6 @@ static hash_item *do_map_item_alloc(const void *key, const uint32_t nkey,
     return it;
 }
 
-static map_hash_node *do_map_node_alloc(uint8_t hash_depth, const void *cookie)
-{
-    return do_htree_node_alloc(hash_depth, cookie);
-}
-
 static map_elem_item *do_map_elem_alloc(const int nfield,
                                         const uint32_t nbytes, const void *cookie)
 {
@@ -310,7 +305,7 @@ static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *el
     }
 
     if (node->hcnt[hidx] >= HTREE_MAX_HASHCHAIN_SIZE) {
-        map_hash_node *n_node = do_map_node_alloc(node->hdepth+1, cookie);
+        map_hash_node *n_node = do_htree_node_alloc(node->hdepth+1, cookie);
         if (n_node == NULL) {
             res = ENGINE_ENOMEM;
             return res;
@@ -611,7 +606,7 @@ static ENGINE_ERROR_CODE do_map_elem_insert(hash_item *it, map_elem_item *elem,
     /* create the root hash node if it does not exist */
     bool new_root_flag = false;
     if (info->root == NULL) { /* empty map */
-        map_hash_node *r_node = do_map_node_alloc(0, cookie);
+        map_hash_node *r_node = do_htree_node_alloc(0, cookie);
         if (r_node == NULL) {
             return ENGINE_ENOMEM;
         }
