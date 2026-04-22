@@ -27,13 +27,11 @@ typedef struct {
     uint16_t         hidx;
 } htree_prev_info;
 
-typedef bool (*htree_elem_match_func)(const htree_elem_item *elem,
-                                      const void *key, size_t klen);
-
 htree_hash_node  *do_htree_node_alloc(uint8_t hash_depth, const void *cookie);
 void              do_htree_node_free(htree_hash_node *node);
 bool              do_htree_node_is_leaf(const htree_hash_node *node);
 
+htree_elem_item  *do_htree_elem_alloc(uint8_t nfield, uint16_t nbytes, const void *cookie);
 uint32_t          do_htree_elem_ntotal(htree_elem_item *elem);
 void              do_htree_elem_free(htree_elem_item *elem);
 void              do_htree_elem_release(htree_elem_item *elem);
@@ -46,12 +44,10 @@ void              do_htree_node_unlink(htree_hash_node **root,
 
 htree_elem_item  *do_htree_elem_find(htree_hash_node *root,
                                      const void *key, size_t klen,
-                                     htree_elem_match_func match_func,
                                      htree_prev_info *pinfo);
 ENGINE_ERROR_CODE do_htree_elem_link(htree_hash_node **root,
                                      htree_elem_item *elem,
                                      const void *key, size_t klen,
-                                     htree_elem_match_func match_func,
                                      bool replace_if_exist,
                                      htree_elem_item **old_elem,
                                      bool *node_split,

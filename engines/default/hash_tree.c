@@ -48,6 +48,23 @@ void do_htree_node_free(htree_hash_node *node)
     do_item_mem_free(node, sizeof(htree_hash_node));
 }
 
+htree_elem_item *do_htree_elem_alloc(uint8_t nfield, uint16_t nbytes, const void *cookie)
+{
+    size_t ntotal = sizeof(htree_elem_item) + nfield + nbytes;
+
+    htree_elem_item *elem = do_item_mem_alloc(ntotal, LRU_CLSID_FOR_SMALL, cookie);
+    if (elem != NULL) {
+        elem->slabs_clsid = slabs_clsid(ntotal);
+        assert(elem->slabs_clsid > 0);
+
+        elem->refcount = 0;
+        elem->nfield   = nfield;
+        elem->nbytes   = nbytes;
+        elem->status   = ELEM_STATUS_UNLINKED;
+    }
+    return elem;
+}
+
 uint32_t do_htree_elem_ntotal(htree_elem_item *elem)
 {
     return sizeof(htree_elem_item) + elem->nfield + elem->nbytes;
@@ -158,10 +175,17 @@ void do_htree_node_unlink(htree_hash_node **root,
     do_htree_node_free(node);
 }
 
+static inline bool htree_elem_match(const htree_elem_item *elem,
+                                    const void *key, size_t klen)
+{
+    if (elem->nfield > 0)
+        return (elem->nfield == klen && memcmp(elem->data, key, klen) == 0);
+    return (elem->nbytes == klen && memcmp(elem->data, key, klen) == 0);
+}
+
 ENGINE_ERROR_CODE do_htree_elem_link(htree_hash_node **root,
                                      htree_elem_item *elem,
                                      const void *key, size_t klen,
-                                     htree_elem_match_func match_func,
                                      bool replace_if_exist,
                                      htree_elem_item **old_elem,
                                      bool *node_split,
@@ -182,7 +206,7 @@ ENGINE_ERROR_CODE do_htree_elem_link(htree_hash_node **root,
     assert(node != NULL);
 
     for (find = (htree_elem_item *)node->htab[hidx]; find != NULL; find = find->next) {
-        if (find->hval == elem->hval && match_func(find, key, klen))
+        if (find->hval == elem->hval && htree_elem_match(find, key, klen))
             break;
         prev = find;
     }
@@ -232,7 +256,6 @@ ENGINE_ERROR_CODE do_htree_elem_link(htree_hash_node **root,
 
 htree_elem_item *do_htree_elem_find(htree_hash_node *root,
                                     const void *key, size_t klen,
-                                    htree_elem_match_func match_func,
                                     htree_prev_info *pinfo)
 {
     uint32_t hval = (uint32_t)genhash_string_hash(key, klen);
@@ -250,7 +273,7 @@ htree_elem_item *do_htree_elem_find(htree_hash_node *root,
     assert(node != NULL);
 
     for (elem = (htree_elem_item *)node->htab[hidx]; elem != NULL; elem = elem->next) {
-        if (elem->hval == hval && match_func(elem, key, klen)) {
+        if (elem->hval == hval && htree_elem_match(elem, key, klen)) {
             if (pinfo != NULL) {
                 pinfo->node = node;
                 pinfo->prev = prev;
