@@ -502,7 +502,7 @@ ENGINE_ERROR_CODE set_elem_exist(const char *key, const uint32_t nkey,
             if ((info->mflags & COLL_META_FLAG_READABLE) == 0) {
                 ret = ENGINE_UNREADABLE; break;
             }
-            if (htree_elem_find(info->root, value, nbytes, NULL) != NULL)
+            if (htree_elem_find(info->root, value, nbytes) != NULL)
                 *exist = true;
             else
                 *exist = false;

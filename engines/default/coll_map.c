@@ -237,10 +237,8 @@ static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
                                             const field_t *field, const char *value,
                                             const uint32_t nbytes, const void *cookie)
 {
-    htree_prev_info pinfo;
-    map_elem_item *elem;
-
-    elem = (map_elem_item *)htree_elem_find(info->root, field->value, field->length, &pinfo);
+    map_elem_item *elem = (map_elem_item *)htree_elem_find(info->root,
+                                                           field->value, field->length);
     if (elem == NULL) {
         return ENGINE_ELEM_ENOENT;
     }
@@ -260,30 +258,21 @@ static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
         if (new_elem == NULL) {
             return ENGINE_ENOMEM;
         }
-
         memcpy(new_elem->data, elem->data, elem->nfield);
         memcpy(new_elem->data + elem->nfield, value, nbytes);
-        new_elem->hval = elem->hval;
 
-        new_elem->next = elem->next;
-        if (pinfo.prev != NULL)
-            ((map_elem_item *)pinfo.prev)->next = new_elem;
-        else
-            pinfo.node->htab[pinfo.hidx] = new_elem;
-        new_elem->status = ELEM_STATUS_LINKED;
-        elem->status = ELEM_STATUS_UNLINKED;
-
-        size_t old_stotal = slabs_space_size(htree_elem_ntotal((htree_elem_item *)elem));
-        size_t new_stotal = slabs_space_size(htree_elem_ntotal((htree_elem_item *)new_elem));
-        if (new_stotal != old_stotal) {
-            assert(info->stotal > 0);
-            if (new_stotal > old_stotal)
-                do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, new_stotal - old_stotal);
-            else
-                do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, old_stotal - new_stotal);
+        htree_elem_item *old_elem = NULL;
+        ENGINE_ERROR_CODE ret = htree_elem_insert(&info->root, (htree_elem_item *)new_elem,
+                                                  field->value, field->length,
+                                                  true, &old_elem, NULL, NULL,
+                                                  (coll_meta_info *)info, cookie);
+        if (ret != ENGINE_SUCCESS) {
+            htree_elem_free((htree_elem_item *)new_elem);
+            return ret;
         }
-        CLOG_MAP_ELEM_INSERT(info, elem, new_elem);
-        if (elem->refcount == 0) htree_elem_free((htree_elem_item *)elem);
+        assert(old_elem != NULL);
+        CLOG_MAP_ELEM_INSERT(info, (map_elem_item *)old_elem, new_elem);
+        if (old_elem->refcount == 0) htree_elem_free(old_elem);
     }
 
     return ENGINE_SUCCESS;

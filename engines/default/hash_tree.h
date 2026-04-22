@@ -21,17 +21,7 @@
 
 #include "item_base.h"
 
-typedef struct {
-    htree_hash_node *node;
-    htree_elem_item *prev;
-    uint16_t         hidx;
-} htree_prev_info;
-
 htree_hash_node  *htree_node_alloc(uint8_t hash_depth, const void *cookie);
-
-void              htree_node_free(htree_hash_node *node);
-
-bool              htree_node_is_leaf(const htree_hash_node *node);
 
 htree_elem_item  *htree_elem_alloc(uint8_t nfield, uint16_t nbytes, const void *cookie);
 
@@ -86,12 +76,8 @@ bool              htree_traverse_dfs_byfield(htree_hash_node **root,
                                              htree_elem_delete_cb on_elem_delete,
                                              coll_meta_info *meta);
 
-void              htree_elem_delete(htree_hash_node *node, const int hidx,
-                                    htree_elem_item *prev, htree_elem_item *elem);
-
 htree_elem_item  *htree_elem_find(htree_hash_node *root,
-                                  const void *key, size_t klen,
-                                  htree_prev_info *pinfo);
+                                  const void *key, size_t klen);
 
 /* replaced_out: if non-NULL and a replace occurred, *replaced_out is set to the old
  * element (unlinked, refcount unchanged). Caller is responsible for CLOG and free. */

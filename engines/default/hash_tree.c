@@ -50,7 +50,7 @@ htree_hash_node *htree_node_alloc(uint8_t hash_depth, const void *cookie)
     return node;
 }
 
-void htree_node_free(htree_hash_node *node)
+static void do_htree_node_free(htree_hash_node *node)
 {
     do_item_mem_free(node, sizeof(htree_hash_node));
 }
@@ -94,7 +94,7 @@ void htree_elem_release(htree_elem_item *elem)
     }
 }
 
-bool htree_node_is_leaf(const htree_hash_node *node)
+static bool htree_node_is_leaf(const htree_hash_node *node)
 {
     for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
         if (node->hcnt[hidx] == -1)
@@ -500,7 +500,7 @@ bool htree_traverse_dfs_byfield(htree_hash_node **root,
                                          delete, elem_array, on_elem_delete, meta);
 }
 
-void htree_elem_delete(htree_hash_node *node, const int hidx,
+static void do_htree_elem_delete(htree_hash_node *node, const int hidx,
                           htree_elem_item *prev, htree_elem_item *elem)
 {
     if (prev != NULL) prev->next = elem->next;
@@ -511,15 +511,12 @@ void htree_elem_delete(htree_hash_node *node, const int hidx,
 }
 
 htree_elem_item *htree_elem_find(htree_hash_node *root,
-                                    const void *key, size_t klen,
-                                    htree_prev_info *pinfo)
+                                    const void *key, size_t klen)
 {
     if (root == NULL) return NULL;
 
     uint32_t hval = (uint32_t)genhash_string_hash(key, klen);
     htree_hash_node *node = root;
-    htree_elem_item *elem = NULL;
-    htree_elem_item *prev = NULL;
     int hidx = -1;
 
     while (node != NULL) {
@@ -530,16 +527,10 @@ htree_elem_item *htree_elem_find(htree_hash_node *root,
     }
     assert(node != NULL);
 
-    for (elem = (htree_elem_item *)node->htab[hidx]; elem != NULL; elem = elem->next) {
-        if (elem->hval == hval && htree_elem_match(elem, key, klen)) {
-            if (pinfo != NULL) {
-                pinfo->node = node;
-                pinfo->prev = prev;
-                pinfo->hidx = hidx;
-            }
-            break;
-        }
-        prev = elem;
+    for (htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
+         elem != NULL; elem = elem->next) {
+        if (elem->hval == hval && htree_elem_match(elem, key, klen))
+            return elem;
     }
-    return elem;
+    return NULL;
 }
