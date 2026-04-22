@@ -39,7 +39,6 @@ static struct default_engine *engine=NULL;
 static struct engine_config  *config=NULL; // engine config
 static EXTENSION_LOGGER_DESCRIPTOR *logger;
 
-
 /* Cache Lock */
 static inline void LOCK_CACHE(void)
 {
@@ -164,27 +163,6 @@ static hash_item *do_set_item_alloc(const void *key, const uint32_t nkey,
     return it;
 }
 
-static void do_set_node_link(set_meta_info *info,
-                             set_hash_node *par_node, const int par_hidx,
-                             set_hash_node *node)
-{
-    htree_node_insert(&info->root, par_node, par_hidx, node);
-
-    size_t stotal = slabs_space_size(sizeof(set_hash_node));
-    do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
-}
-
-static void do_set_node_unlink(set_meta_info *info,
-                               set_hash_node *par_node, const int par_hidx)
-{
-    htree_node_remove(&info->root, par_node, par_hidx);
-
-    if (info->stotal > 0) {
-        size_t stotal = slabs_space_size(sizeof(set_hash_node));
-        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
-    }
-}
-
 static ENGINE_ERROR_CODE do_set_elem_link(set_meta_info *info, set_elem_item *elem,
                                           const void *cookie)
 {
@@ -213,7 +191,7 @@ static ENGINE_ERROR_CODE do_set_elem_delete_with_value(set_meta_info *info,
                                             set_on_clog_delete,
                                             (coll_meta_info *)info);
     if (found && info->root->tot_elem_cnt == 0) {
-        do_set_node_unlink(info, NULL, 0);
+        htree_node_unlink(&info->root, NULL, 0, (coll_meta_info *)info);
     }
     return found ? ENGINE_SUCCESS : ENGINE_ELEM_ENOENT;
 }
@@ -228,7 +206,7 @@ static uint32_t do_set_elem_delete(set_meta_info *info, const uint32_t count,
                                         set_on_clog_delete, cause,
                                         (coll_meta_info *)info);
         if (info->root->tot_elem_cnt == 0) {
-            do_set_node_unlink(info, NULL, 0);
+            htree_node_unlink(&info->root, NULL, 0, (coll_meta_info *)info);
         }
     }
     return fcnt;
@@ -303,7 +281,7 @@ static uint32_t do_set_elem_get(set_meta_info *info,
         fcnt = do_set_elem_traverse_rand(info, count, delete, elem_array);
     }
     if (delete && info->root->tot_elem_cnt == 0) {
-        do_set_node_unlink(info, NULL, 0);
+        htree_node_unlink(&info->root, NULL, 0, (coll_meta_info *)info);
     }
     if (delete) {
         CLOG_ELEM_DELETE_END((coll_meta_info*)info, ELEM_DELETE_NORMAL);
@@ -339,7 +317,7 @@ static ENGINE_ERROR_CODE do_set_elem_insert(hash_item *it, set_elem_item *elem,
         if (r_node == NULL) {
             return ENGINE_ENOMEM;
         }
-        do_set_node_link(info, NULL, 0, r_node);
+        htree_node_link(&info->root, NULL, 0, r_node, (coll_meta_info *)info);
         new_root_flag = true;
     }
 
@@ -347,7 +325,7 @@ static ENGINE_ERROR_CODE do_set_elem_insert(hash_item *it, set_elem_item *elem,
     ret = do_set_elem_link(info, elem, cookie);
     if (ret != ENGINE_SUCCESS) {
         if (new_root_flag) {
-            do_set_node_unlink(info, NULL, 0);
+            htree_node_unlink(&info->root, NULL, 0, (coll_meta_info *)info);
         }
         return ret;
     }
@@ -572,7 +550,6 @@ ENGINE_ERROR_CODE set_elem_get(const char *key, const uint32_t nkey,
     }
     return ret;
 }
-
 
 /* See do_set_elem_traverse_dfs and do_set_elem_link. do_set_elem_traverse_dfs
  * can visit all elements, but only supports get and delete operations.

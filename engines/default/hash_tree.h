@@ -31,12 +31,13 @@ void              htree_elem_free(htree_elem_item *elem);
 
 void              htree_elem_release(htree_elem_item *elem);
 
-void              htree_node_insert(htree_hash_node **root,
-                                    htree_hash_node *par_node, int par_hidx,
-                                    htree_hash_node *node);
+void              htree_node_link(htree_hash_node **root,
+                                 htree_hash_node *par_node, int par_hidx,
+                                 htree_hash_node *node, coll_meta_info *meta);
 
-void              htree_node_remove(htree_hash_node **root,
-                                    htree_hash_node *par_node, int par_hidx);
+void              htree_node_unlink(htree_hash_node **root,
+                                    htree_hash_node *par_node, int par_hidx,
+                                    coll_meta_info *meta);
 
 /* Called during delete traversals: CLOG only, space accounting is handled internally */
 typedef void (*htree_elem_delete_cb)(htree_elem_item *elem,

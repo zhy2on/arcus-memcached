@@ -39,7 +39,6 @@ static struct default_engine *engine=NULL;
 static struct engine_config  *config=NULL; // engine config
 static EXTENSION_LOGGER_DESCRIPTOR *logger;
 
-
 /* Cache Lock */
 static inline void LOCK_CACHE(void)
 {
@@ -116,27 +115,6 @@ static hash_item *do_map_item_alloc(const void *key, const uint32_t nkey,
         assert((hash_item*)COLL_GET_HASH_ITEM(info) == it);
     }
     return it;
-}
-
-static void do_map_node_link(map_meta_info *info,
-                             map_hash_node *par_node, const int par_hidx,
-                             map_hash_node *node)
-{
-    htree_node_insert(&info->root, par_node, par_hidx, node);
-
-    size_t stotal = slabs_space_size(sizeof(map_hash_node));
-    do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, stotal);
-}
-
-static void do_map_node_unlink(map_meta_info *info,
-                               map_hash_node *par_node, const int par_hidx)
-{
-    htree_node_remove(&info->root, par_node, par_hidx);
-
-    if (info->stotal > 0) {
-        size_t stotal = slabs_space_size(sizeof(map_hash_node));
-        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, stotal);
-    }
 }
 
 static ENGINE_ERROR_CODE map_on_pre_replace(htree_elem_item *old_htree,
@@ -226,7 +204,7 @@ static uint32_t do_map_elem_delete_with_field(map_meta_info *info, const int num
             }
         }
         if (info->root->tot_elem_cnt == 0) {
-            do_map_node_unlink(info, NULL, 0);
+            htree_node_unlink(&info->root, NULL, 0, (coll_meta_info *)info);
         }
         CLOG_ELEM_DELETE_END((coll_meta_info*)info, cause);
     }
@@ -288,7 +266,7 @@ static uint32_t do_map_elem_delete(map_meta_info *info, const uint32_t count,
                                         map_on_clog_delete, cause,
                                         (coll_meta_info *)info);
         if (info->root->tot_elem_cnt == 0) {
-            do_map_node_unlink(info, NULL, 0);
+            htree_node_unlink(&info->root, NULL, 0, (coll_meta_info *)info);
         }
     }
     return fcnt;
@@ -327,7 +305,7 @@ static uint32_t do_map_elem_get(map_meta_info *info,
         }
     }
     if (delete && info->root->tot_elem_cnt == 0) {
-        do_map_node_unlink(info, NULL, 0);
+        htree_node_unlink(&info->root, NULL, 0, (coll_meta_info *)info);
     }
     if (delete) {
         CLOG_ELEM_DELETE_END((coll_meta_info*)info, ELEM_DELETE_NORMAL);
@@ -349,7 +327,7 @@ static ENGINE_ERROR_CODE do_map_elem_insert(hash_item *it, map_elem_item *elem,
         if (r_node == NULL) {
             return ENGINE_ENOMEM;
         }
-        do_map_node_link(info, NULL, 0, r_node);
+        htree_node_link(&info->root, NULL, 0, r_node, (coll_meta_info *)info);
         new_root_flag = true;
     }
 
@@ -357,7 +335,7 @@ static ENGINE_ERROR_CODE do_map_elem_insert(hash_item *it, map_elem_item *elem,
     ret = do_map_elem_link(info, elem, replace_if_exist, replaced, cookie);
     if (ret != ENGINE_SUCCESS) {
         if (new_root_flag) {
-            do_map_node_unlink(info, NULL, 0);
+            htree_node_unlink(&info->root, NULL, 0, (coll_meta_info *)info);
         }
         return ret;
     }
