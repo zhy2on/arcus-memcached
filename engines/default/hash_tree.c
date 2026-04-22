@@ -18,6 +18,7 @@
  */
 #include "config.h"
 #include <assert.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "default_engine.h"
@@ -252,6 +253,83 @@ ENGINE_ERROR_CODE do_htree_elem_link(htree_hash_node **root,
 
     if (old_elem) *old_elem = NULL;
     return ENGINE_SUCCESS;
+}
+
+int do_htree_traverse_sampling(htree_hash_node *node,
+                               uint32_t remain, const uint32_t count,
+                               htree_elem_item **elem_array)
+{
+    int hidx;
+    int fcnt = 0;
+
+    for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
+        if (node->hcnt[hidx] == -1) {
+            htree_hash_node *child_node = (htree_hash_node *)node->htab[hidx];
+            fcnt += do_htree_traverse_sampling(child_node, remain,
+                                               count - fcnt, &elem_array[fcnt]);
+            remain -= child_node->tot_elem_cnt;
+        } else if (node->hcnt[hidx] > 0) {
+            htree_elem_item *elem = node->htab[hidx];
+            while (elem != NULL) {
+                if ((rand() % remain) < (count - fcnt)) {
+                    elem->refcount++;
+                    elem_array[fcnt] = elem;
+                    fcnt++;
+                    if (fcnt >= count) break;
+                }
+                remain -= 1;
+                elem = elem->next;
+            }
+        }
+        if (fcnt >= count) break;
+    }
+    return fcnt;
+}
+
+htree_elem_item *do_htree_elem_at_offset(htree_hash_node **root,
+                                         htree_hash_node *node,
+                                         uint32_t offset, const bool delete,
+                                         htree_elem_delete_cb on_delete, void *ctx)
+{
+    int hidx;
+    for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
+        if (node->hcnt[hidx] == -1) {
+            htree_hash_node *child_node = (htree_hash_node *)node->htab[hidx];
+            if (offset >= child_node->tot_elem_cnt) {
+                offset -= child_node->tot_elem_cnt;
+                continue;
+            }
+            htree_elem_item *found = do_htree_elem_at_offset(root, child_node, offset,
+                                                             delete, on_delete, ctx);
+            if (delete) {
+                if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2)
+                    && do_htree_node_is_leaf(child_node)) {
+                    do_htree_node_unlink(root, node, hidx);
+                }
+                node->tot_elem_cnt -= 1;
+            }
+            return found;
+        } else if (node->hcnt[hidx] > 0) {
+            if (offset >= (uint32_t)node->hcnt[hidx]) {
+                offset -= node->hcnt[hidx];
+                continue;
+            }
+            htree_elem_item *prev = NULL;
+            htree_elem_item *elem = node->htab[hidx];
+            while (offset > 0) {
+                prev = elem;
+                elem = elem->next;
+                offset -= 1;
+            }
+            elem->refcount++;
+            if (delete) {
+                do_htree_elem_unlink(node, hidx, prev, elem);
+                if (on_delete) on_delete(elem, ELEM_DELETE_NORMAL, ctx);
+            }
+            return elem;
+        }
+    }
+    return NULL;
 }
 
 int do_htree_traverse_dfs_bycnt(htree_hash_node **root,

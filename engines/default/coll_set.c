@@ -233,15 +233,6 @@ static void set_elem_on_delete(htree_elem_item *elem,
     }
 }
 
-static void do_set_elem_unlink(set_meta_info *info,
-                               set_hash_node *node, const int hidx,
-                               set_elem_item *prev, set_elem_item *elem,
-                               enum elem_delete_cause cause)
-{
-    do_htree_elem_unlink(node, hidx, prev, elem);
-    set_elem_on_delete(elem, cause, info);
-}
-
 static set_elem_item *do_set_elem_find(set_meta_info *info, const char *val, const int vlen)
 {
     return (set_elem_item *)do_htree_elem_find(info->root, val, vlen, NULL);
@@ -262,78 +253,6 @@ static ENGINE_ERROR_CODE do_set_elem_delete_with_value(set_meta_info *info,
         do_set_node_unlink(info, NULL, 0);
     }
     return found ? ENGINE_SUCCESS : ENGINE_ELEM_ENOENT;
-}
-
-static int do_set_elem_traverse_sampling(set_meta_info *info, set_hash_node *node,
-                                         uint32_t remain, const uint32_t count,
-                                         set_elem_item **elem_array)
-{
-    int hidx;
-    int fcnt = 0; /* found count */
-
-    for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
-        if (node->hcnt[hidx] == -1) {
-            set_hash_node *child_node = (set_hash_node *)node->htab[hidx];
-            fcnt += do_set_elem_traverse_sampling(info, child_node, remain,
-                                                  count - fcnt, &elem_array[fcnt]);
-            remain -= child_node->tot_elem_cnt;
-        } else if (node->hcnt[hidx] > 0) {
-            set_elem_item *elem = node->htab[hidx];
-            while (elem != NULL) {
-                if ((rand() % remain) < (count - fcnt)) {
-                    elem->refcount++;
-                    elem_array[fcnt] = elem;
-                    fcnt++;
-                    if (fcnt >= count) break;
-                }
-                remain -= 1;
-                elem = elem->next;
-            }
-        }
-        if (fcnt >= count) break;
-    }
-    return fcnt;
-}
-
-static set_elem_item *do_set_elem_at_offset(set_meta_info *info, set_hash_node *node,
-                                            uint32_t offset, const bool delete)
-{
-    int hidx;
-    for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
-        if (node->hcnt[hidx] == -1) {
-            set_hash_node *child_node = (set_hash_node *)node->htab[hidx];
-            if (offset >= child_node->tot_elem_cnt) {
-                offset -= child_node->tot_elem_cnt;
-                continue;
-            }
-            set_elem_item *found = do_set_elem_at_offset(info, child_node, offset, delete);
-            if (delete) {
-                if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2)
-                    && do_htree_node_is_leaf(child_node)) {
-                    do_set_node_unlink(info, node, hidx);
-                }
-                node->tot_elem_cnt -= 1;
-            }
-            return found;
-        } else if (node->hcnt[hidx] > 0) {
-            if (offset >= node->hcnt[hidx]) {
-                offset -= node->hcnt[hidx];
-                continue;
-            }
-            set_elem_item *prev = NULL;
-            set_elem_item *elem = node->htab[hidx];
-            while (offset > 0) {
-                prev = elem;
-                elem = elem->next;
-                offset -= 1;
-            }
-            elem->refcount++;
-            if (delete) do_set_elem_unlink(info, node, hidx, prev, elem,
-                                           ELEM_DELETE_NORMAL);
-            return elem;
-        }
-    }
-    return NULL;
 }
 
 static uint32_t do_set_elem_delete(set_meta_info *info, const uint32_t count,
@@ -360,8 +279,9 @@ static uint32_t do_set_elem_traverse_rand(set_meta_info *info,
     if (delete) { /* Deleting partial elements */
         while (fcnt < count) {
             int rand_offset = (rand() % info->ccnt);
-            set_elem_item *found = do_set_elem_at_offset(info, info->root,
-                                                         rand_offset, delete);
+            set_elem_item *found = (set_elem_item *)
+                do_htree_elem_at_offset(&info->root, info->root, rand_offset, delete,
+                                        set_elem_on_delete, info);
             assert(found != NULL);
             elem_array[fcnt++] = found;
         }
@@ -372,16 +292,17 @@ static uint32_t do_set_elem_traverse_rand(set_meta_info *info,
         while (fcnt < count) {
             int rand_offset = (rand() % info->ccnt);
             if (hash_insert(&offset_ht, rand_offset)) {
-                set_elem_item *found = do_set_elem_at_offset(info, info->root,
-                                                             rand_offset, delete);
+                set_elem_item *found = (set_elem_item *)
+                    do_htree_elem_at_offset(&info->root, info->root, rand_offset, delete,
+                                            NULL, NULL);
                 assert(found != NULL);
                 elem_array[fcnt++] = found;
             }
         }
         hash_free(&offset_ht);
     } else { /* Use sampling */
-        fcnt = do_set_elem_traverse_sampling(info, info->root, info->ccnt,
-                                             count, elem_array);
+        fcnt = do_htree_traverse_sampling(info->root, info->ccnt,
+                                          count, (htree_elem_item **)elem_array);
         for (int i = fcnt - 1; i > 0; i--) {
             int rand_idx = rand() % (i + 1);
             if (rand_idx != i) {

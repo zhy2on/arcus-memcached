@@ -45,6 +45,13 @@ void              do_htree_node_unlink(htree_hash_node **root,
 typedef void (*htree_elem_delete_cb)(htree_elem_item *elem,
                                      enum elem_delete_cause cause, void *ctx);
 
+int               do_htree_traverse_sampling(htree_hash_node *node,
+                                             uint32_t remain, const uint32_t count,
+                                             htree_elem_item **elem_array);
+htree_elem_item  *do_htree_elem_at_offset(htree_hash_node **root,
+                                          htree_hash_node *node,
+                                          uint32_t offset, const bool delete,
+                                          htree_elem_delete_cb on_delete, void *ctx);
 int               do_htree_traverse_dfs_bycnt(htree_hash_node **root,
                                               htree_hash_node *node,
                                               const uint32_t count, const bool delete,
