@@ -185,57 +185,20 @@ static void do_set_node_unlink(set_meta_info *info,
     }
 }
 
-static void set_elem_on_insert(htree_elem_item *elem, void *ctx)
-{
-    set_meta_info *info = (set_meta_info *)ctx;
-    info->ccnt++;
-    size_t stotal = slabs_space_size(htree_elem_ntotal(elem));
-    do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
-}
-
-static void set_node_on_insert(void *ctx)
-{
-    set_meta_info *info = (set_meta_info *)ctx;
-    size_t stotal = slabs_space_size(sizeof(set_hash_node));
-    do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
-}
-
 static ENGINE_ERROR_CODE do_set_elem_link(set_meta_info *info, set_elem_item *elem,
                                           const void *cookie)
 {
     assert(info->root != NULL);
+    htree_ctx ctx = { (coll_meta_info *)info, ITEM_TYPE_SET };
     return htree_elem_insert(&info->root, (htree_elem_item *)elem,
-                                elem->data, elem->nbytes,
-                                false, NULL, NULL,
-                                set_elem_on_insert, NULL,
-                                set_node_on_insert, info, cookie);
+                             elem->data, elem->nbytes,
+                             false, NULL, NULL, NULL, &ctx, cookie);
 }
 
-static void set_elem_on_delete(htree_elem_item *elem,
-                               enum elem_delete_cause cause, void *ctx)
+static void set_on_clog_delete(htree_elem_item *elem,
+                               enum elem_delete_cause cause, htree_ctx *ctx)
 {
-    set_meta_info *info = (set_meta_info *)ctx;
-    info->ccnt--;
-
-    CLOG_SET_ELEM_DELETE(info, elem, cause);
-
-    if (info->stotal > 0) {
-        size_t stotal = slabs_space_size(htree_elem_ntotal(elem));
-        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
-    }
-
-    if (elem->refcount == 0) {
-        htree_elem_free(elem);
-    }
-}
-
-static void set_node_on_remove(void *ctx)
-{
-    set_meta_info *info = (set_meta_info *)ctx;
-    if (info->stotal > 0) {
-        size_t stotal = slabs_space_size(sizeof(set_hash_node));
-        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
-    }
+    CLOG_SET_ELEM_DELETE((set_meta_info *)ctx->meta, elem, cause);
 }
 
 static ENGINE_ERROR_CODE do_set_elem_delete_with_value(set_meta_info *info,
@@ -245,9 +208,10 @@ static ENGINE_ERROR_CODE do_set_elem_delete_with_value(set_meta_info *info,
     assert(cause == ELEM_DELETE_NORMAL);
     if (info->root == NULL) return ENGINE_ELEM_ENOENT;
 
+    htree_ctx ctx = { (coll_meta_info *)info, ITEM_TYPE_SET };
     bool found = htree_traverse_dfs_byfield(&info->root, info->root,
-                                               val, vlen, true, NULL,
-                                               set_elem_on_delete, set_node_on_remove, info);
+                                            val, vlen, true, NULL,
+                                            set_on_clog_delete, &ctx);
     if (found && info->root->tot_elem_cnt == 0) {
         do_set_node_unlink(info, NULL, 0);
     }
@@ -260,8 +224,9 @@ static uint32_t do_set_elem_delete(set_meta_info *info, const uint32_t count,
     assert(cause == ELEM_DELETE_COLL);
     uint32_t fcnt = 0;
     if (info->root != NULL) {
+        htree_ctx ctx = { (coll_meta_info *)info, ITEM_TYPE_SET };
         fcnt = htree_traverse_dfs_bycnt(&info->root, info->root, count, true, NULL,
-                                           set_elem_on_delete, set_node_on_remove, cause, info);
+                                        set_on_clog_delete, cause, &ctx);
         if (info->root->tot_elem_cnt == 0) {
             do_set_node_unlink(info, NULL, 0);
         }
@@ -281,11 +246,12 @@ static uint32_t do_set_elem_traverse_rand(set_meta_info *info,
     uint32_t fcnt = 0;
 
     if (delete) { /* Deleting partial elements */
+        htree_ctx ctx = { (coll_meta_info *)info, ITEM_TYPE_SET };
         while (fcnt < count) {
             int rand_offset = (rand() % info->ccnt);
             set_elem_item *found = (set_elem_item *)
                 htree_elem_at_offset(&info->root, info->root, rand_offset, delete,
-                                        set_elem_on_delete, set_node_on_remove, info);
+                                     set_on_clog_delete, &ctx);
             assert(found != NULL);
             elem_array[fcnt++] = found;
         }
@@ -298,7 +264,7 @@ static uint32_t do_set_elem_traverse_rand(set_meta_info *info,
             if (hash_insert(&offset_ht, rand_offset)) {
                 set_elem_item *found = (set_elem_item *)
                     htree_elem_at_offset(&info->root, info->root, rand_offset, delete,
-                                            NULL, NULL, NULL);
+                                         NULL, NULL);
                 assert(found != NULL);
                 elem_array[fcnt++] = found;
             }
@@ -329,11 +295,12 @@ static uint32_t do_set_elem_get(set_meta_info *info,
     if (delete) {
         CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, count, ELEM_DELETE_NORMAL);
     }
+    htree_ctx ctx = { (coll_meta_info *)info, ITEM_TYPE_SET };
     if (count >= info->ccnt || count == 0) { /* Return all */
         fcnt = htree_traverse_dfs_bycnt(&info->root, info->root, count, delete, elem_array,
-                                           (delete ? set_elem_on_delete : NULL),
-                                           (delete ? set_node_on_remove : NULL),
-                                           ELEM_DELETE_NORMAL, info);
+                                        (delete ? set_on_clog_delete : NULL),
+                                        ELEM_DELETE_NORMAL,
+                                        (delete ? &ctx : NULL));
     } else { /* Return some */
         fcnt = do_set_elem_traverse_rand(info, count, delete, elem_array);
     }

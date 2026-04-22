@@ -27,6 +27,12 @@ typedef struct {
     uint16_t         hidx;
 } htree_prev_info;
 
+/* Context for space accounting: passed to all insert/delete operations */
+typedef struct {
+    coll_meta_info   *meta;
+    ENGINE_ITEM_TYPE  item_type;
+} htree_ctx;
+
 htree_hash_node  *htree_node_alloc(uint8_t hash_depth, const void *cookie);
 
 void              htree_node_free(htree_hash_node *node);
@@ -48,22 +54,16 @@ void              htree_node_insert(htree_hash_node **root,
 void              htree_node_remove(htree_hash_node **root,
                                     htree_hash_node *par_node, int par_hidx);
 
+/* Called during delete traversals: CLOG only, space accounting is handled internally */
 typedef void (*htree_elem_delete_cb)(htree_elem_item *elem,
-                                     enum elem_delete_cause cause, void *ctx);
-
-typedef void (*htree_node_remove_cb)(void *ctx);
-
-typedef void (*htree_elem_insert_cb)(htree_elem_item *new_elem, void *ctx);
-
-typedef void (*htree_elem_replace_cb)(htree_elem_item *old_elem,
-                                      htree_elem_item *new_elem, void *ctx);
+                                     enum elem_delete_cause cause, htree_ctx *ctx);
 
 typedef ENGINE_ERROR_CODE (*htree_pre_replace_cb)(htree_elem_item *old_elem,
-                                                  htree_elem_item *new_elem, void *ctx);
+                                                  htree_elem_item *new_elem,
+                                                  htree_ctx *ctx);
 
-typedef ENGINE_ERROR_CODE (*htree_pre_insert_cb)(htree_elem_item *new_elem, void *ctx);
-
-typedef void (*htree_node_insert_cb)(void *ctx);
+typedef ENGINE_ERROR_CODE (*htree_pre_insert_cb)(htree_elem_item *new_elem,
+                                                 htree_ctx *ctx);
 
 int               htree_traverse_sampling(htree_hash_node *node,
                                           uint32_t remain, const uint32_t count,
@@ -73,15 +73,15 @@ htree_elem_item  *htree_elem_at_offset(htree_hash_node **root,
                                        htree_hash_node *node,
                                        uint32_t offset, const bool delete,
                                        htree_elem_delete_cb on_elem_delete,
-                                       htree_node_remove_cb on_node_remove, void *ctx);
+                                       htree_ctx *ctx);
 
 int               htree_traverse_dfs_bycnt(htree_hash_node **root,
                                            htree_hash_node *node,
                                            const uint32_t count, const bool delete,
                                            htree_elem_item **elem_array,
                                            htree_elem_delete_cb on_elem_delete,
-                                           htree_node_remove_cb on_node_remove,
-                                           enum elem_delete_cause cause, void *ctx);
+                                           enum elem_delete_cause cause,
+                                           htree_ctx *ctx);
 
 bool              htree_traverse_dfs_byfield(htree_hash_node **root,
                                              htree_hash_node *node,
@@ -89,8 +89,7 @@ bool              htree_traverse_dfs_byfield(htree_hash_node **root,
                                              const bool delete,
                                              htree_elem_item **elem_array,
                                              htree_elem_delete_cb on_elem_delete,
-                                             htree_node_remove_cb on_node_remove,
-                                             void *ctx);
+                                             htree_ctx *ctx);
 
 void              htree_elem_delete(htree_hash_node *node, const int hidx,
                                     htree_elem_item *prev, htree_elem_item *elem);
@@ -99,15 +98,15 @@ htree_elem_item  *htree_elem_find(htree_hash_node *root,
                                   const void *key, size_t klen,
                                   htree_prev_info *pinfo);
 
+/* replaced_out: if non-NULL and a replace occurred, *replaced_out is set to the old
+ * element (unlinked, refcount unchanged). Caller is responsible for CLOG and free. */
 ENGINE_ERROR_CODE htree_elem_insert(htree_hash_node **root,
                                     htree_elem_item *elem,
                                     const void *key, size_t klen,
                                     bool replace_if_exist,
+                                    htree_elem_item **replaced_out,
                                     htree_pre_replace_cb on_pre_replace,
                                     htree_pre_insert_cb on_pre_insert,
-                                    htree_elem_insert_cb on_elem_insert,
-                                    htree_elem_replace_cb on_elem_replace,
-                                    htree_node_insert_cb on_node_insert,
-                                    void *ctx, const void *cookie);
+                                    htree_ctx *ctx, const void *cookie);
 
 #endif /* HASH_TREE_H */
