@@ -141,10 +141,10 @@ static void do_map_node_unlink(map_meta_info *info,
 
 static ENGINE_ERROR_CODE map_on_pre_replace(htree_elem_item *old_htree,
                                             htree_elem_item *new_htree,
-                                            htree_ctx *ctx)
+                                            coll_meta_info *meta)
 {
 #ifdef ENABLE_STICKY_ITEM
-    map_meta_info *info = (map_meta_info *)ctx->meta;
+    map_meta_info *info = (map_meta_info *)meta;
     if (IS_STICKY_COLLFLG(info)) {
         map_elem_item *old_elem = (map_elem_item *)old_htree;
         map_elem_item *new_elem = (map_elem_item *)new_htree;
@@ -155,9 +155,10 @@ static ENGINE_ERROR_CODE map_on_pre_replace(htree_elem_item *old_htree,
     return ENGINE_SUCCESS;
 }
 
-static ENGINE_ERROR_CODE map_on_pre_insert(htree_elem_item *new_htree, htree_ctx *ctx)
+static ENGINE_ERROR_CODE map_on_pre_insert(htree_elem_item *new_htree,
+                                           coll_meta_info *meta)
 {
-    map_meta_info *info = (map_meta_info *)ctx->meta;
+    map_meta_info *info = (map_meta_info *)meta;
 #ifdef ENABLE_STICKY_ITEM
     if (IS_STICKY_COLLFLG(info)) {
         if (do_item_sticky_overflowed())
@@ -175,7 +176,6 @@ static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *el
                                           const void *cookie)
 {
     assert(info->root != NULL);
-    htree_ctx ctx = { (coll_meta_info *)info, ITEM_TYPE_MAP };
     htree_elem_item *old_elem = NULL;
     ENGINE_ERROR_CODE ret;
 
@@ -183,7 +183,7 @@ static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *el
                             elem->data, elem->nfield,
                             replace_if_exist, &old_elem,
                             map_on_pre_replace, map_on_pre_insert,
-                            &ctx, cookie);
+                            (coll_meta_info *)info, cookie);
     if (ret != ENGINE_SUCCESS) return ret;
 
     if (old_elem != NULL) {
@@ -198,9 +198,9 @@ static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *el
 }
 
 static void map_on_clog_delete(htree_elem_item *elem,
-                               enum elem_delete_cause cause, htree_ctx *ctx)
+                               enum elem_delete_cause cause, coll_meta_info *meta)
 {
-    CLOG_MAP_ELEM_DELETE((map_meta_info *)ctx->meta, elem, cause);
+    CLOG_MAP_ELEM_DELETE((map_meta_info *)meta, elem, cause);
 }
 
 static uint32_t do_map_elem_delete_with_field(map_meta_info *info, const int numfields,
@@ -210,16 +210,17 @@ static uint32_t do_map_elem_delete_with_field(map_meta_info *info, const int num
     uint32_t delcnt = 0;
 
     if (info->root != NULL) {
-        htree_ctx ctx = { (coll_meta_info *)info, ITEM_TYPE_MAP };
         CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, numfields, cause);
         if (numfields == 0) {
             delcnt = htree_traverse_dfs_bycnt(&info->root, info->root, 0, true, NULL,
-                                              map_on_clog_delete, cause, &ctx);
+                                              map_on_clog_delete, cause,
+                                              (coll_meta_info *)info);
         } else {
             for (int ii = 0; ii < numfields; ii++) {
                 if (htree_traverse_dfs_byfield(&info->root, info->root,
                                                flist[ii].value, flist[ii].length,
-                                               true, NULL, map_on_clog_delete, &ctx)) {
+                                               true, NULL, map_on_clog_delete,
+                                               (coll_meta_info *)info)) {
                     delcnt++;
                 }
             }
@@ -294,9 +295,9 @@ static uint32_t do_map_elem_delete(map_meta_info *info, const uint32_t count,
     assert(cause == ELEM_DELETE_COLL);
     uint32_t fcnt = 0;
     if (info->root != NULL) {
-        htree_ctx ctx = { (coll_meta_info *)info, ITEM_TYPE_MAP };
         fcnt = htree_traverse_dfs_bycnt(&info->root, info->root, count, true, NULL,
-                                        map_on_clog_delete, cause, &ctx);
+                                        map_on_clog_delete, cause,
+                                        (coll_meta_info *)info);
         if (info->root->tot_elem_cnt == 0) {
             do_map_node_unlink(info, NULL, 0);
         }
@@ -319,20 +320,19 @@ static uint32_t do_map_elem_get(map_meta_info *info,
     if (delete) {
         CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, numfields, ELEM_DELETE_NORMAL);
     }
-    htree_ctx ctx = { (coll_meta_info *)info, ITEM_TYPE_MAP };
     if (numfields == 0) {
         fcnt = htree_traverse_dfs_bycnt(&info->root, info->root, 0, delete,
                                         elem_array,
                                         (delete ? map_on_clog_delete : NULL),
                                         ELEM_DELETE_NORMAL,
-                                        (delete ? &ctx : NULL));
+                                        (delete ? (coll_meta_info *)info : NULL));
     } else {
         for (int ii = 0; ii < numfields; ii++) {
             if (htree_traverse_dfs_byfield(&info->root, info->root,
                                            flist[ii].value, flist[ii].length,
                                            delete, &elem_array[fcnt],
                                            (delete ? map_on_clog_delete : NULL),
-                                           (delete ? &ctx : NULL))) {
+                                           (delete ? (coll_meta_info *)info : NULL))) {
                 fcnt++;
             }
         }
