@@ -136,6 +136,78 @@ void do_htree_node_unlink(htree_hash_node **root,
     do_htree_node_free(node);
 }
 
+ENGINE_ERROR_CODE do_htree_elem_link(htree_hash_node **root,
+                                     htree_elem_item *elem,
+                                     const void *key, size_t klen,
+                                     htree_elem_match_func match_func,
+                                     bool replace_if_exist,
+                                     htree_elem_item **old_elem,
+                                     bool *node_split,
+                                     const void *cookie)
+{
+    elem->hval = (uint32_t)genhash_string_hash(key, klen);
+    htree_hash_node *node = *root;
+    htree_elem_item *prev = NULL;
+    htree_elem_item *find = NULL;
+    int hidx = -1;
+
+    while (node != NULL) {
+        hidx = HTREE_GET_HASHIDX(elem->hval, node->hdepth);
+        if (node->hcnt[hidx] >= 0)
+            break;
+        node = (htree_hash_node *)node->htab[hidx];
+    }
+    assert(node != NULL);
+
+    for (find = (htree_elem_item *)node->htab[hidx]; find != NULL; find = find->next) {
+        if (find->hval == elem->hval && match_func(find, key, klen))
+            break;
+        prev = find;
+    }
+
+    if (find != NULL) {
+        if (!replace_if_exist)
+            return ENGINE_ELEM_EEXISTS;
+        /* replace: swap find out, elem in */
+        elem->next = find->next;
+        if (prev != NULL) prev->next = elem;
+        else              node->htab[hidx] = elem;
+        elem->status = ELEM_STATUS_LINKED;
+        find->status = ELEM_STATUS_UNLINKED;
+        if (old_elem) *old_elem = find;
+        return ENGINE_SUCCESS;
+    }
+
+    if (node->hcnt[hidx] >= HTREE_MAX_HASHCHAIN_SIZE) {
+        htree_hash_node *n_node = do_htree_node_alloc(node->hdepth + 1, cookie);
+        if (n_node == NULL)
+            return ENGINE_ENOMEM;
+        do_htree_node_link(root, node, hidx, n_node);
+        if (node_split) *node_split = true;
+        node = n_node;
+        hidx = HTREE_GET_HASHIDX(elem->hval, node->hdepth);
+    } else {
+        if (node_split) *node_split = false;
+    }
+
+    elem->next = (htree_elem_item *)node->htab[hidx];
+    node->htab[hidx] = elem;
+    node->hcnt[hidx] += 1;
+    node->tot_elem_cnt += 1;
+    elem->status = ELEM_STATUS_LINKED;
+
+    htree_hash_node *par_node = *root;
+    while (par_node != node) {
+        par_node->tot_elem_cnt += 1;
+        hidx = HTREE_GET_HASHIDX(elem->hval, par_node->hdepth);
+        assert(par_node->hcnt[hidx] == -1);
+        par_node = (htree_hash_node *)par_node->htab[hidx];
+    }
+
+    if (old_elem) *old_elem = NULL;
+    return ENGINE_SUCCESS;
+}
+
 htree_elem_item *do_htree_elem_find(htree_hash_node *root,
                                     const void *key, size_t klen,
                                     htree_elem_match_func match_func,

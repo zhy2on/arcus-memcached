@@ -239,61 +239,22 @@ static ENGINE_ERROR_CODE do_set_elem_link(set_meta_info *info, set_elem_item *el
                                           const void *cookie)
 {
     assert(info->root != NULL);
-    set_hash_node *node = info->root;
-    set_elem_item *find;
-    int hidx = -1;
+    bool node_split;
+    ENGINE_ERROR_CODE ret;
 
-    /* set hash value */
-    elem->hval = genhash_string_hash(elem->value, elem->nbytes);
+    ret = do_htree_elem_link(&info->root, (htree_elem_item *)elem,
+                             elem->value, elem->nbytes,
+                             set_elem_match, false, NULL, &node_split, cookie);
+    if (ret != ENGINE_SUCCESS)
+        return ret;
 
-    while (node != NULL) {
-        hidx = HTREE_GET_HASHIDX(elem->hval, node->hdepth);
-        if (node->hcnt[hidx] >= 0) /* set element hash chain */
-            break;
-        node = node->htab[hidx];
-    }
-    assert(node != NULL);
-    assert(hidx != -1);
-
-    for (find = node->htab[hidx]; find != NULL; find = find->next) {
-        if (find->hval == elem->hval && set_elem_match((htree_elem_item *)find, elem->value, elem->nbytes))
-            break;
-    }
-    if (find != NULL) {
-        return ENGINE_ELEM_EEXISTS;
-    }
-
-    if (node->hcnt[hidx] >= HTREE_MAX_HASHCHAIN_SIZE) {
-        set_hash_node *n_node = do_htree_node_alloc(node->hdepth+1, cookie);
-        if (n_node == NULL) {
-            return ENGINE_ENOMEM;
-        }
-        do_set_node_link(info, node, hidx, n_node);
-
-        node = n_node;
-        hidx = HTREE_GET_HASHIDX(elem->hval, node->hdepth);
-    }
-
-    elem->next = node->htab[hidx];
-    node->htab[hidx] = elem;
-    node->hcnt[hidx] += 1;
-    node->tot_elem_cnt += 1;
-    elem->status = ELEM_STATUS_LINKED;
-
-    set_hash_node *par_node = info->root;
-    while (par_node != node) {
-        par_node->tot_elem_cnt += 1;
-        hidx = HTREE_GET_HASHIDX(elem->hval, par_node->hdepth);
-        assert(par_node->hcnt[hidx] == -1);
-        par_node = par_node->htab[hidx];
-    }
-    info->ccnt++;
-
-    if (1) { /* apply memory space */
-        size_t stotal = slabs_space_size(do_set_elem_ntotal(elem));
+    if (node_split) {
+        size_t stotal = slabs_space_size(sizeof(set_hash_node));
         do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
     }
-
+    info->ccnt++;
+    size_t stotal = slabs_space_size(do_set_elem_ntotal(elem));
+    do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
     return ENGINE_SUCCESS;
 }
 
