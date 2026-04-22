@@ -62,8 +62,7 @@ typedef struct _map_prev_info {
     uint16_t       hidx;
 } map_prev_info;
 
-#define MAP_GET_HASHIDX(hval, hdepth) \
-        (((hval) & (MAP_HASHIDX_MASK << ((hdepth)*4))) >> ((hdepth)*4))
+#define MAP_GET_HASHIDX(hval, hdepth) HTREE_GET_HASHIDX(hval, hdepth)
 
 static inline int map_hash_eq(const int h1, const void *v1, size_t vlen1,
                               const int h2, const void *v2, size_t vlen2)

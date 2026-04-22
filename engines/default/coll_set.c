@@ -102,8 +102,7 @@ static bool hash_insert(hash_table *ht, int key)
  * SET collection manangement
  */
 
-#define SET_GET_HASHIDX(hval, hdepth) \
-        (((hval) & (SET_HASHIDX_MASK << ((hdepth)*4))) >> ((hdepth)*4))
+#define SET_GET_HASHIDX(hval, hdepth) HTREE_GET_HASHIDX(hval, hdepth)
 
 static inline int set_hash_eq(const int h1, const void *v1, size_t vlen1,
                               const int h2, const void *v2, size_t vlen2)
