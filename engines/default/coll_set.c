@@ -102,8 +102,6 @@ static bool hash_insert(hash_table *ht, int key)
  * SET collection manangement
  */
 
-#define SET_GET_HASHIDX(hval, hdepth) HTREE_GET_HASHIDX(hval, hdepth)
-
 static inline int set_hash_eq(const int h1, const void *v1, size_t vlen1,
                               const int h2, const void *v2, size_t vlen2)
 {
@@ -117,7 +115,7 @@ static inline uint32_t do_set_elem_ntotal(set_elem_item *elem)
 
 static inline bool is_leaf_node(set_hash_node *node)
 {
-    for (int hidx = 0; hidx < SET_HASHTAB_SIZE; hidx++) {
+    for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
         if (node->hcnt[hidx] == -1)
             return false;
     }
@@ -200,8 +198,8 @@ static set_hash_node *do_set_node_alloc(uint8_t hash_depth, const void *cookie)
         node->refcount    = 0;
         node->hdepth      = hash_depth;
         node->tot_elem_cnt = 0;
-        memset(node->hcnt, 0, SET_HASHTAB_SIZE*sizeof(uint16_t));
-        memset(node->htab, 0, SET_HASHTAB_SIZE*sizeof(void*));
+        memset(node->hcnt, 0, HTREE_HASHTAB_SIZE*sizeof(uint16_t));
+        memset(node->htab, 0, HTREE_HASHTAB_SIZE*sizeof(void*));
     }
     return node;
 }
@@ -257,7 +255,7 @@ static void do_set_node_link(set_meta_info *info,
             elem = par_node->htab[par_hidx];
             par_node->htab[par_hidx] = elem->next;
 
-            int hidx = SET_GET_HASHIDX(elem->hval, node->hdepth);
+            int hidx = HTREE_GET_HASHIDX(elem->hval, node->hdepth);
             elem->next = node->htab[hidx];
             node->htab[hidx] = elem;
             node->hcnt[hidx] += 1;
@@ -291,7 +289,7 @@ static void do_set_node_unlink(set_meta_info *info,
 
         node = (set_hash_node *)par_node->htab[par_hidx];
 
-        for (hidx = 0; hidx < SET_HASHTAB_SIZE; hidx++) {
+        for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
             assert(node->hcnt[hidx] >= 0);
             if (node->hcnt[hidx] > 0) {
                 fcnt += node->hcnt[hidx];
@@ -334,7 +332,7 @@ static ENGINE_ERROR_CODE do_set_elem_link(set_meta_info *info, set_elem_item *el
     elem->hval = genhash_string_hash(elem->value, elem->nbytes);
 
     while (node != NULL) {
-        hidx = SET_GET_HASHIDX(elem->hval, node->hdepth);
+        hidx = HTREE_GET_HASHIDX(elem->hval, node->hdepth);
         if (node->hcnt[hidx] >= 0) /* set element hash chain */
             break;
         node = node->htab[hidx];
@@ -351,7 +349,7 @@ static ENGINE_ERROR_CODE do_set_elem_link(set_meta_info *info, set_elem_item *el
         return ENGINE_ELEM_EEXISTS;
     }
 
-    if (node->hcnt[hidx] >= SET_MAX_HASHCHAIN_SIZE) {
+    if (node->hcnt[hidx] >= HTREE_MAX_HASHCHAIN_SIZE) {
         set_hash_node *n_node = do_set_node_alloc(node->hdepth+1, cookie);
         if (n_node == NULL) {
             return ENGINE_ENOMEM;
@@ -359,7 +357,7 @@ static ENGINE_ERROR_CODE do_set_elem_link(set_meta_info *info, set_elem_item *el
         do_set_node_link(info, node, hidx, n_node);
 
         node = n_node;
-        hidx = SET_GET_HASHIDX(elem->hval, node->hdepth);
+        hidx = HTREE_GET_HASHIDX(elem->hval, node->hdepth);
     }
 
     elem->next = node->htab[hidx];
@@ -371,7 +369,7 @@ static ENGINE_ERROR_CODE do_set_elem_link(set_meta_info *info, set_elem_item *el
     set_hash_node *par_node = info->root;
     while (par_node != node) {
         par_node->tot_elem_cnt += 1;
-        hidx = SET_GET_HASHIDX(elem->hval, par_node->hdepth);
+        hidx = HTREE_GET_HASHIDX(elem->hval, par_node->hdepth);
         assert(par_node->hcnt[hidx] == -1);
         par_node = par_node->htab[hidx];
     }
@@ -419,7 +417,7 @@ static set_elem_item *do_set_elem_find(set_meta_info *info, const char *val, con
         int hidx = 0;
 
         while (node != NULL) {
-            hidx = SET_GET_HASHIDX(hval, node->hdepth);
+            hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
             if (node->hcnt[hidx] >= 0) /* set element hash chain */
                 break;
             node = node->htab[hidx];
@@ -439,13 +437,13 @@ static ENGINE_ERROR_CODE do_set_elem_traverse_delete(set_meta_info *info, set_ha
 {
     ENGINE_ERROR_CODE ret;
 
-    int hidx = SET_GET_HASHIDX(hval, node->hdepth);
+    int hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
 
     if (node->hcnt[hidx] == -1) {
         set_hash_node *child_node = node->htab[hidx];
         ret = do_set_elem_traverse_delete(info, child_node, hval, val, vlen);
         if (ret == ENGINE_SUCCESS) {
-            if (child_node->tot_elem_cnt < (SET_MAX_HASHCHAIN_SIZE/2)
+            if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2)
                 && is_leaf_node(child_node)) {
                 do_set_node_unlink(info, node, hidx);
             }
@@ -498,7 +496,7 @@ static int do_set_elem_traverse_dfs(set_meta_info *info, set_hash_node *node,
     int hidx;
     int fcnt = 0; /* found count */
 
-    for (hidx = 0; hidx < SET_HASHTAB_SIZE; hidx++) {
+    for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
         if (node->hcnt[hidx] == -1) {
             set_hash_node *child_node = (set_hash_node *)node->htab[hidx];
             int rcnt = (count > 0 ? (count - fcnt) : 0);
@@ -506,7 +504,7 @@ static int do_set_elem_traverse_dfs(set_meta_info *info, set_hash_node *node,
                                                 (elem_array==NULL ? NULL : &elem_array[fcnt]));
             fcnt += ecnt;
             if (delete) {
-                if (child_node->tot_elem_cnt < (SET_MAX_HASHCHAIN_SIZE/2)
+                if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2)
                     && is_leaf_node(child_node)) {
                     do_set_node_unlink(info, node, hidx);
                 }
@@ -539,7 +537,7 @@ static int do_set_elem_traverse_sampling(set_meta_info *info, set_hash_node *nod
     int hidx;
     int fcnt = 0; /* found count */
 
-    for (hidx = 0; hidx < SET_HASHTAB_SIZE; hidx++) {
+    for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
         if (node->hcnt[hidx] == -1) {
             set_hash_node *child_node = (set_hash_node *)node->htab[hidx];
             fcnt += do_set_elem_traverse_sampling(info, child_node, remain,
@@ -567,7 +565,7 @@ static set_elem_item *do_set_elem_at_offset(set_meta_info *info, set_hash_node *
                                             uint32_t offset, const bool delete)
 {
     int hidx;
-    for (hidx = 0; hidx < SET_HASHTAB_SIZE; hidx++) {
+    for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
         if (node->hcnt[hidx] == -1) {
             set_hash_node *child_node = (set_hash_node *)node->htab[hidx];
             if (offset >= child_node->tot_elem_cnt) {
@@ -576,7 +574,7 @@ static set_elem_item *do_set_elem_at_offset(set_meta_info *info, set_hash_node *
             }
             set_elem_item *found = do_set_elem_at_offset(info, child_node, offset, delete);
             if (delete) {
-                if (child_node->tot_elem_cnt < (SET_MAX_HASHCHAIN_SIZE/2)
+                if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2)
                     && is_leaf_node(child_node)) {
                     do_set_node_unlink(info, node, hidx);
                 }
@@ -991,7 +989,7 @@ void set_elem_get_all(set_meta_info *info, elems_result_t *eresult)
         }
 
         /* Scan the current node */
-        for (i = stack[cur_depth].idx; i < SET_HASHTAB_SIZE; i++) {
+        for (i = stack[cur_depth].idx; i < HTREE_HASHTAB_SIZE; i++) {
             if (node->hcnt[i] >= 0) {
                 /* Hash chain.  Insert all elements on the chain into the
                  * to-be-copied list.
@@ -1012,7 +1010,7 @@ void set_elem_get_all(set_meta_info *info, elems_result_t *eresult)
         }
 
         /* Scannned everything in this node. Go up. */
-        if (i >= SET_HASHTAB_SIZE) {
+        if (i >= HTREE_HASHTAB_SIZE) {
             cur_depth--;
             if (cur_depth < 0)
                 node = NULL; /* done */

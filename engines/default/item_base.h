@@ -242,10 +242,6 @@ typedef struct _htree_hash_node {
 } htree_hash_node;
 
 /* set meta info */
-#define SET_HASHTAB_SIZE       HTREE_HASHTAB_SIZE
-#define SET_HASHIDX_MASK       HTREE_HASHIDX_MASK
-#define SET_MAX_HASHCHAIN_SIZE HTREE_MAX_HASHCHAIN_SIZE
-
 typedef htree_hash_node set_hash_node;
 
 typedef struct _set_meta_info {
@@ -259,10 +255,6 @@ typedef struct _set_meta_info {
 } set_meta_info;
 
 /* map meta info */
-#define MAP_HASHTAB_SIZE       HTREE_HASHTAB_SIZE
-#define MAP_HASHIDX_MASK       HTREE_HASHIDX_MASK
-#define MAP_MAX_HASHCHAIN_SIZE HTREE_MAX_HASHCHAIN_SIZE
-
 typedef htree_hash_node map_hash_node;
 
 typedef struct _map_meta_info {

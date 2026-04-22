@@ -62,11 +62,10 @@ typedef struct _map_prev_info {
     uint16_t       hidx;
 } map_prev_info;
 
-#define MAP_GET_HASHIDX(hval, hdepth) HTREE_GET_HASHIDX(hval, hdepth)
 
 static inline bool is_leaf_node(const map_hash_node *node)
 {
-    for (int hidx = 0; hidx < MAP_HASHTAB_SIZE; hidx++) {
+    for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
         if (node->hcnt[hidx] == -1)
             return false;
     }
@@ -160,8 +159,8 @@ static map_hash_node *do_map_node_alloc(uint8_t hash_depth, const void *cookie)
         node->refcount     = 0;
         node->hdepth       = hash_depth;
         node->tot_elem_cnt = 0;
-        memset(node->hcnt, 0, MAP_HASHTAB_SIZE*sizeof(uint16_t));
-        memset(node->htab, 0, MAP_HASHTAB_SIZE*sizeof(void*));
+        memset(node->hcnt, 0, HTREE_HASHTAB_SIZE*sizeof(uint16_t));
+        memset(node->htab, 0, HTREE_HASHTAB_SIZE*sizeof(void*));
     }
     return node;
 }
@@ -222,7 +221,7 @@ static void do_map_node_link(map_meta_info *info,
             elem = par_node->htab[par_hidx];
             par_node->htab[par_hidx] = elem->next;
 
-            int hidx = MAP_GET_HASHIDX(elem->hval, node->hdepth);
+            int hidx = HTREE_GET_HASHIDX(elem->hval, node->hdepth);
             elem->next = node->htab[hidx];
             node->htab[hidx] = elem;
             node->hcnt[hidx] += 1;
@@ -259,7 +258,7 @@ static void do_map_node_unlink(map_meta_info *info,
 
         node = (map_hash_node *)par_node->htab[par_hidx];
 
-        for (hidx = 0; hidx < MAP_HASHTAB_SIZE; hidx++) {
+        for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
             assert(node->hcnt[hidx] >= 0);
             if (node->hcnt[hidx] > 0) {
                 fcnt += node->hcnt[hidx];
@@ -349,7 +348,7 @@ static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *el
     elem->hval = genhash_string_hash(elem->data, elem->nfield);
 
     while (node != NULL) {
-        hidx = MAP_GET_HASHIDX(elem->hval, node->hdepth);
+        hidx = HTREE_GET_HASHIDX(elem->hval, node->hdepth);
         if (node->hcnt[hidx] >= 0) /* map element hash chain */
             break;
         node = node->htab[hidx];
@@ -398,7 +397,7 @@ static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *el
         return ENGINE_EOVERFLOW;
     }
 
-    if (node->hcnt[hidx] >= MAP_MAX_HASHCHAIN_SIZE) {
+    if (node->hcnt[hidx] >= HTREE_MAX_HASHCHAIN_SIZE) {
         map_hash_node *n_node = do_map_node_alloc(node->hdepth+1, cookie);
         if (n_node == NULL) {
             res = ENGINE_ENOMEM;
@@ -407,7 +406,7 @@ static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *el
         do_map_node_link(info, node, hidx, n_node);
 
         node = n_node;
-        hidx = MAP_GET_HASHIDX(elem->hval, node->hdepth);
+        hidx = HTREE_GET_HASHIDX(elem->hval, node->hdepth);
     }
 
     CLOG_MAP_ELEM_INSERT(info, NULL, elem);
@@ -421,7 +420,7 @@ static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *el
     map_hash_node *par_node = info->root;
     while (par_node != node) {
         par_node->tot_elem_cnt += 1;
-        hidx = MAP_GET_HASHIDX(elem->hval, par_node->hdepth);
+        hidx = HTREE_GET_HASHIDX(elem->hval, par_node->hdepth);
         assert(par_node->hcnt[hidx] == -1);
         par_node = par_node->htab[hidx];
     }
@@ -464,13 +463,13 @@ static bool do_map_elem_traverse_dfs_byfield(map_meta_info *info, map_hash_node 
                                              map_elem_item **elem_array)
 {
     bool ret;
-    int hidx = MAP_GET_HASHIDX(hval, node->hdepth);
+    int hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
 
     if (node->hcnt[hidx] == -1) {
         map_hash_node *child_node = node->htab[hidx];
         ret = do_map_elem_traverse_dfs_byfield(info, child_node, hval, field, delete, elem_array);
         if (ret && delete) {
-            if (child_node->tot_elem_cnt < (MAP_MAX_HASHCHAIN_SIZE/2) &&
+            if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2) &&
                 is_leaf_node(child_node)) {
                 do_map_node_unlink(info, node, hidx);
             }
@@ -509,7 +508,7 @@ static int do_map_elem_traverse_dfs_bycnt(map_meta_info *info, map_hash_node *no
     int hidx;
     int fcnt = 0; /* found count */
 
-    for (hidx = 0; hidx < MAP_HASHTAB_SIZE; hidx++) {
+    for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
         if (node->hcnt[hidx] == -1) {
             map_hash_node *child_node = (map_hash_node *)node->htab[hidx];
             int rcnt = (count > 0 ? (count - fcnt) : 0);
@@ -517,7 +516,7 @@ static int do_map_elem_traverse_dfs_bycnt(map_meta_info *info, map_hash_node *no
                                                             (elem_array==NULL ? NULL : &elem_array[fcnt]), cause);
             fcnt += child_fcnt;
             if (delete && child_fcnt > 0) {
-                if (child_node->tot_elem_cnt < (MAP_MAX_HASHCHAIN_SIZE/2) &&
+                if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2) &&
                     is_leaf_node(child_node)) {
                     do_map_node_unlink(info, node, hidx);
                 }
@@ -575,7 +574,7 @@ static map_elem_item *do_map_elem_find(map_hash_node *node, const field_t *field
     int hidx = -1;
 
     while (node != NULL) {
-        hidx = MAP_GET_HASHIDX(hval, node->hdepth);
+        hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
         if (node->hcnt[hidx] >= 0) /* map element hash chain */
             break;
         node = node->htab[hidx];
@@ -980,7 +979,7 @@ void map_elem_get_all(map_meta_info *info, elems_result_t *eresult)
         }
 
         /* Scan the current node */
-        for (i = stack[cur_depth].idx; i < MAP_HASHTAB_SIZE; i++) {
+        for (i = stack[cur_depth].idx; i < HTREE_HASHTAB_SIZE; i++) {
             if (node->hcnt[i] >= 0) {
                 /* Hash chain.  Insert all elements on the chain into the
                  * to-be-copied list.
@@ -1001,7 +1000,7 @@ void map_elem_get_all(map_meta_info *info, elems_result_t *eresult)
         }
 
         /* Scannned everything in this node.  Go up. */
-        if (i >= MAP_HASHTAB_SIZE) {
+        if (i >= HTREE_HASHTAB_SIZE) {
             cur_depth--;
             if (cur_depth < 0)
                 node = NULL; /* done */
