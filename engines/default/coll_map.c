@@ -177,7 +177,7 @@ static void map_elem_on_replace(htree_elem_item *old_htree, htree_elem_item *new
         do_htree_elem_free(old_htree);
 }
 
-static ENGINE_ERROR_CODE map_pre_replace(htree_elem_item *old_htree,
+static ENGINE_ERROR_CODE map_on_pre_replace(htree_elem_item *old_htree,
                                          htree_elem_item *new_htree, void *ctx)
 {
 #ifdef ENABLE_STICKY_ITEM
@@ -192,7 +192,7 @@ static ENGINE_ERROR_CODE map_pre_replace(htree_elem_item *old_htree,
     return ENGINE_SUCCESS;
 }
 
-static ENGINE_ERROR_CODE map_pre_insert(htree_elem_item *new_htree, void *ctx)
+static ENGINE_ERROR_CODE map_on_pre_insert(htree_elem_item *new_htree, void *ctx)
 {
     map_meta_info *info = ((map_elem_link_ctx *)ctx)->info;
 #ifdef ENABLE_STICKY_ITEM
@@ -223,7 +223,7 @@ static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *el
     return do_htree_elem_insert(&info->root, (htree_elem_item *)elem,
                                 elem->data, elem->nfield,
                                 replace_if_exist,
-                                map_pre_replace, map_pre_insert,
+                                map_on_pre_replace, map_on_pre_insert,
                                 map_elem_on_insert, map_elem_on_replace,
                                 map_node_on_insert, &lctx, cookie);
 }
@@ -287,7 +287,7 @@ static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
                                             const field_t *field, const char *value,
                                             const uint32_t nbytes, const void *cookie)
 {
-    htree_prev_info  pinfo;
+    htree_prev_info pinfo;
     map_elem_item *elem;
 
     elem = (map_elem_item *)do_htree_elem_find(info->root, field->value, field->length, &pinfo);
@@ -296,33 +296,25 @@ static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
     }
 
     if (elem->refcount == 0 && elem->nbytes == nbytes) {
-        /* old body size == new body size */
-        /* do in-place update */
+        /* old body size == new body size: do in-place update */
         memcpy(elem->data + elem->nfield, value, nbytes);
         CLOG_MAP_ELEM_INSERT(info, elem, elem);
     } else {
-        /* old body size != new body size */
 #ifdef ENABLE_STICKY_ITEM
-        /* sticky memory limit check */
         if (IS_STICKY_COLLFLG(info)) {
-            if (elem->nbytes < nbytes) {
-                if (do_item_sticky_overflowed())
-                    return ENGINE_ENOMEM;
-            }
+            if (elem->nbytes < nbytes && do_item_sticky_overflowed())
+                return ENGINE_ENOMEM;
         }
 #endif
-
         map_elem_item *new_elem = do_htree_elem_alloc((uint8_t)elem->nfield, (uint16_t)nbytes, cookie);
         if (new_elem == NULL) {
             return ENGINE_ENOMEM;
         }
 
-        /* build the new element */
         memcpy(new_elem->data, elem->data, elem->nfield);
         memcpy(new_elem->data + elem->nfield, value, nbytes);
         new_elem->hval = elem->hval;
 
-        /* replace the element */
         new_elem->next = elem->next;
         if (pinfo.prev != NULL)
             ((map_elem_item *)pinfo.prev)->next = new_elem;

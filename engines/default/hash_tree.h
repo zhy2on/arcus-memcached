@@ -63,6 +63,7 @@ typedef ENGINE_ERROR_CODE (*htree_pre_replace_cb)(htree_elem_item *old_elem,
 
 typedef ENGINE_ERROR_CODE (*htree_pre_insert_cb)(htree_elem_item *new_elem, void *ctx);
 
+
 typedef void (*htree_node_insert_cb)(void *ctx);
 
 int               do_htree_traverse_sampling(htree_hash_node *node,
@@ -98,6 +99,7 @@ void              do_htree_elem_delete(htree_hash_node *node, const int hidx,
 htree_elem_item  *do_htree_elem_find(htree_hash_node *root,
                                      const void *key, size_t klen,
                                      htree_prev_info *pinfo);
+
 
 ENGINE_ERROR_CODE do_htree_elem_insert(htree_hash_node **root,
                                     htree_elem_item *elem,
