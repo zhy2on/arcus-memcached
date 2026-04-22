@@ -39,8 +39,6 @@ static struct default_engine *engine=NULL;
 static struct engine_config  *config=NULL; // engine config
 static EXTENSION_LOGGER_DESCRIPTOR *logger;
 
-/* used by set and map collection */
-extern int genhash_string_hash(const void* p, size_t nkey);
 
 /* Cache Lock */
 static inline void LOCK_CACHE(void)
@@ -268,8 +266,7 @@ static uint32_t do_map_elem_delete_with_field(map_meta_info *info, const int num
                                                  map_elem_on_delete, map_node_on_remove, cause, info);
         } else {
             for (int ii = 0; ii < numfields; ii++) {
-                int hval = genhash_string_hash(flist[ii].value, flist[ii].length);
-                if (do_htree_traverse_dfs_byfield(&info->root, info->root, hval,
+                if (do_htree_traverse_dfs_byfield(&info->root, info->root,
                                                   flist[ii].value, flist[ii].length,
                                                   true, NULL, map_elem_on_delete, map_node_on_remove, info)) {
                     delcnt++;
@@ -370,8 +367,7 @@ static uint32_t do_map_elem_get(map_meta_info *info,
                                            ELEM_DELETE_NORMAL, info);
     } else {
         for (int ii = 0; ii < numfields; ii++) {
-            int hval = genhash_string_hash(flist[ii].value, flist[ii].length);
-            if (do_htree_traverse_dfs_byfield(&info->root, info->root, hval,
+            if (do_htree_traverse_dfs_byfield(&info->root, info->root,
                                               flist[ii].value, flist[ii].length,
                                               delete, &elem_array[fcnt],
                                               (delete ? map_elem_on_delete : NULL),
@@ -634,7 +630,6 @@ ENGINE_ERROR_CODE map_elem_get(const char *key, const uint32_t nkey,
     }
     return ret;
 }
-
 
 /* See do_map_elem_traverse_dfs and do_map_elem_link. do_map_elem_traverse_dfs
  * can visit all elements, but only supports get and delete operations.

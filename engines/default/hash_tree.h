@@ -78,7 +78,6 @@ int               do_htree_traverse_dfs_bycnt(htree_hash_node **root,
 
 bool              do_htree_traverse_dfs_byfield(htree_hash_node **root,
                                                htree_hash_node *node,
-                                               const uint32_t hval,
                                                const void *key, const size_t klen,
                                                const bool delete,
                                                htree_elem_item **elem_array,

@@ -39,8 +39,6 @@ static struct default_engine *engine=NULL;
 static struct engine_config  *config=NULL; // engine config
 static EXTENSION_LOGGER_DESCRIPTOR *logger;
 
-/* used by set and map collection */
-extern int genhash_string_hash(const void* p, size_t nkey);
 
 /* Cache Lock */
 static inline void LOCK_CACHE(void)
@@ -239,7 +237,6 @@ static void set_node_on_remove(void *ctx)
     }
 }
 
-
 static ENGINE_ERROR_CODE do_set_elem_delete_with_value(set_meta_info *info,
                                                        const char *val, const int vlen,
                                                        enum elem_delete_cause cause)
@@ -247,8 +244,7 @@ static ENGINE_ERROR_CODE do_set_elem_delete_with_value(set_meta_info *info,
     assert(cause == ELEM_DELETE_NORMAL);
     if (info->root == NULL) return ENGINE_ELEM_ENOENT;
 
-    int hval = genhash_string_hash(val, vlen);
-    bool found = do_htree_traverse_dfs_byfield(&info->root, info->root, hval,
+    bool found = do_htree_traverse_dfs_byfield(&info->root, info->root,
                                                val, vlen, true, NULL,
                                                set_elem_on_delete, set_node_on_remove, info);
     if (found && info->root->tot_elem_cnt == 0) {

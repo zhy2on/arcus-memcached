@@ -379,23 +379,23 @@ int do_htree_traverse_dfs_bycnt(htree_hash_node **root,
     return fcnt;
 }
 
-bool do_htree_traverse_dfs_byfield(htree_hash_node **root,
-                                   htree_hash_node *node,
-                                   const uint32_t hval,
-                                   const void *key, const size_t klen,
-                                   const bool delete,
-                                   htree_elem_item **elem_array,
-                                   htree_elem_delete_cb on_elem_delete,
-                                   htree_node_remove_cb on_node_remove,
-                                   void *ctx)
+static bool htree_traverse_dfs_byfield(htree_hash_node **root,
+                                       htree_hash_node *node,
+                                       const uint32_t hval,
+                                       const void *key, const size_t klen,
+                                       const bool delete,
+                                       htree_elem_item **elem_array,
+                                       htree_elem_delete_cb on_elem_delete,
+                                       htree_node_remove_cb on_node_remove,
+                                       void *ctx)
 {
     bool ret;
     int hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
 
     if (node->hcnt[hidx] == -1) {
         htree_hash_node *child_node = node->htab[hidx];
-        ret = do_htree_traverse_dfs_byfield(root, child_node, hval, key, klen,
-                                            delete, elem_array, on_elem_delete, on_node_remove, ctx);
+        ret = htree_traverse_dfs_byfield(root, child_node, hval, key, klen,
+                                         delete, elem_array, on_elem_delete, on_node_remove, ctx);
         if (ret && delete) {
             if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2) &&
                 do_htree_node_is_leaf(child_node)) {
@@ -428,6 +428,20 @@ bool do_htree_traverse_dfs_byfield(htree_hash_node **root,
         }
     }
     return ret;
+}
+
+bool do_htree_traverse_dfs_byfield(htree_hash_node **root,
+                                   htree_hash_node *node,
+                                   const void *key, const size_t klen,
+                                   const bool delete,
+                                   htree_elem_item **elem_array,
+                                   htree_elem_delete_cb on_elem_delete,
+                                   htree_node_remove_cb on_node_remove,
+                                   void *ctx)
+{
+    uint32_t hval = (uint32_t)genhash_string_hash(key, klen);
+    return htree_traverse_dfs_byfield(root, node, hval, key, klen,
+                                      delete, elem_array, on_elem_delete, on_node_remove, ctx);
 }
 
 void do_htree_elem_delete(htree_hash_node *node, const int hidx,
