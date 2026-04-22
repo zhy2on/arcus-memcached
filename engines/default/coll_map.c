@@ -122,8 +122,6 @@ static hash_item *do_map_item_alloc(const void *key, const uint32_t nkey,
     return it;
 }
 
-#define do_map_elem_alloc(nfield, nbytes, cookie)  do_htree_elem_alloc((uint8_t)(nfield), (uint16_t)(nbytes), cookie)
-
 
 static void do_map_node_link(map_meta_info *info,
                              map_hash_node *par_node, const int par_hidx,
@@ -436,7 +434,7 @@ static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
         }
 #endif
 
-        map_elem_item *new_elem = do_map_elem_alloc(elem->nfield, nbytes, cookie);
+        map_elem_item *new_elem = do_htree_elem_alloc((uint8_t)elem->nfield, (uint16_t)nbytes, cookie);
         if (new_elem == NULL) {
             return ENGINE_ENOMEM;
         }
@@ -562,7 +560,7 @@ map_elem_item *map_elem_alloc(const int nfield, const uint32_t nbytes, const voi
 {
     map_elem_item *elem;
     LOCK_CACHE();
-    elem = do_map_elem_alloc(nfield, nbytes, cookie);
+    elem = do_htree_elem_alloc((uint8_t)nfield, (uint16_t)nbytes, cookie);
     UNLOCK_CACHE();
     return elem;
 }
@@ -820,10 +818,6 @@ void map_elem_get_all(map_meta_info *info, elems_result_t *eresult)
     assert(eresult->elem_count == info->ccnt);
 }
 
-uint32_t map_elem_ntotal(map_elem_item *elem)
-{
-    return do_htree_elem_ntotal(elem);
-}
 
 ENGINE_ERROR_CODE map_coll_getattr(hash_item *it, item_attr *attrp,
                                    ENGINE_ITEM_ATTR *attr_ids, const uint32_t attr_cnt)
@@ -942,7 +936,7 @@ ENGINE_ERROR_CODE map_apply_elem_insert(void *engine, hash_item *it,
             ret = ENGINE_KEY_ENOENT; break;
         }
 
-        elem = do_map_elem_alloc(nfield, nbytes, NULL);
+        elem = do_htree_elem_alloc((uint8_t)nfield, (uint16_t)nbytes, NULL);
         if (elem == NULL) {
             logger->log(EXTENSION_LOG_WARNING, NULL, "map_apply_elem_insert failed."
                         " element alloc failed. nfield=%d nbytes=%d\n", nfield, nbytes);

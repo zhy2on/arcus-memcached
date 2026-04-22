@@ -56,8 +56,6 @@ uint32_t set_elem_delete_with_count(set_meta_info *info, const uint32_t count);
 
 void set_elem_get_all(set_meta_info *info, elems_result_t *eresult);
 
-uint32_t set_elem_ntotal(set_elem_item *elem);
-
 ENGINE_ERROR_CODE set_coll_getattr(hash_item *it, item_attr *attrp,
                                    ENGINE_ITEM_ATTR *attr_ids, const uint32_t attr_cnt);
 ENGINE_ERROR_CODE set_coll_setattr(hash_item *it, item_attr *attrp,

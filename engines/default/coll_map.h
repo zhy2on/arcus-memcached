@@ -58,8 +58,6 @@ uint32_t map_elem_delete_with_count(map_meta_info *info, const uint32_t count);
 
 void map_elem_get_all(map_meta_info *info, elems_result_t *eresult);
 
-uint32_t map_elem_ntotal(map_elem_item *elem);
-
 ENGINE_ERROR_CODE map_coll_getattr(hash_item *it, item_attr *attrp,
                                    ENGINE_ITEM_ATTR *attr_ids, const uint32_t attr_cnt);
 ENGINE_ERROR_CODE map_coll_setattr(hash_item *it, item_attr *attrp,

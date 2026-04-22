@@ -170,8 +170,6 @@ static hash_item *do_set_item_alloc(const void *key, const uint32_t nkey,
     return it;
 }
 
-#define do_set_elem_alloc(nbytes, cookie)  do_htree_elem_alloc(0, (uint16_t)(nbytes), cookie)
-
 
 static void do_set_node_link(set_meta_info *info,
                              set_hash_node *par_node, const int par_hidx,
@@ -578,7 +576,7 @@ set_elem_item *set_elem_alloc(const uint32_t nbytes, const void *cookie)
 {
     set_elem_item *elem;
     LOCK_CACHE();
-    elem = do_set_elem_alloc(nbytes, cookie);
+    elem = do_htree_elem_alloc(0, (uint16_t)nbytes, cookie);
     UNLOCK_CACHE();
     return elem;
 }
@@ -837,10 +835,6 @@ void set_elem_get_all(set_meta_info *info, elems_result_t *eresult)
     assert(eresult->elem_count == info->ccnt);
 }
 
-uint32_t set_elem_ntotal(set_elem_item *elem)
-{
-    return do_htree_elem_ntotal(elem);
-}
 
 ENGINE_ERROR_CODE set_coll_getattr(hash_item *it, item_attr *attrp,
                                    ENGINE_ITEM_ATTR *attr_ids, const uint32_t attr_cnt)
@@ -957,7 +951,7 @@ ENGINE_ERROR_CODE set_apply_elem_insert(void *engine, hash_item *it,
             ret = ENGINE_KEY_ENOENT; break;
         }
 
-        elem = do_set_elem_alloc(nbytes, NULL);
+        elem = do_htree_elem_alloc(0, (uint16_t)nbytes, NULL);
         if (elem == NULL) {
             logger->log(EXTENSION_LOG_WARNING, NULL, "set_apply_elem_insert failed."
                         " element alloc failed. nbytes=%d\n", nbytes);
