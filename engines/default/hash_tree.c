@@ -188,6 +188,7 @@ ENGINE_ERROR_CODE do_htree_elem_insert(htree_hash_node **root,
                                     htree_elem_item *elem,
                                     const void *key, size_t klen,
                                     bool replace_if_exist,
+                                    htree_elem_insert_cb on_elem_insert,
                                     htree_elem_replace_cb on_elem_replace,
                                     htree_node_insert_cb on_node_insert,
                                     void *ctx, const void *cookie)
@@ -249,6 +250,7 @@ ENGINE_ERROR_CODE do_htree_elem_insert(htree_hash_node **root,
         par_node = (htree_hash_node *)par_node->htab[hidx];
     }
 
+    if (on_elem_insert) on_elem_insert(elem, ctx);
     return ENGINE_SUCCESS;
 }
 

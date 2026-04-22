@@ -139,9 +139,25 @@ static void do_map_node_unlink(map_meta_info *info,
     }
 }
 
+typedef struct {
+    map_meta_info *info;
+    bool *replaced;
+} map_elem_link_ctx;
+
+static void map_elem_on_insert(htree_elem_item *elem, void *ctx)
+{
+    map_meta_info *info = ((map_elem_link_ctx *)ctx)->info;
+    CLOG_MAP_ELEM_INSERT(info, NULL, (map_elem_item *)elem);
+    info->ccnt++;
+    size_t stotal = slabs_space_size(do_htree_elem_ntotal(elem));
+    do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, stotal);
+}
+
 static void map_elem_on_replace(htree_elem_item *old_htree, htree_elem_item *new_htree, void *ctx)
 {
-    map_meta_info *info = (map_meta_info *)ctx;
+    map_elem_link_ctx *lctx = (map_elem_link_ctx *)ctx;
+    map_meta_info *info = lctx->info;
+    if (lctx->replaced) *lctx->replaced = true;
     map_elem_item *old_elem = (map_elem_item *)old_htree;
     map_elem_item *new_elem = (map_elem_item *)new_htree;
 
@@ -163,7 +179,7 @@ static void map_elem_on_replace(htree_elem_item *old_htree, htree_elem_item *new
 
 static void map_node_on_insert(void *ctx)
 {
-    map_meta_info *info = (map_meta_info *)ctx;
+    map_meta_info *info = ((map_elem_link_ctx *)ctx)->info;
     size_t stotal = slabs_space_size(sizeof(map_hash_node));
     do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, stotal);
 }
@@ -205,25 +221,12 @@ static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *el
         }
     }
 
-    bool was_replace = (do_htree_elem_find(info->root, elem->data, elem->nfield, NULL) != NULL);
-    ENGINE_ERROR_CODE ret;
-
-    ret = do_htree_elem_insert(&info->root, (htree_elem_item *)elem,
-                            elem->data, elem->nfield,
-                            replace_if_exist,
-                            map_elem_on_replace, map_node_on_insert, info, cookie);
-    if (ret != ENGINE_SUCCESS)
-        return ret;
-
-    if (was_replace) {
-        if (replaced) *replaced = true;
-    } else {
-        CLOG_MAP_ELEM_INSERT(info, NULL, elem);
-        info->ccnt++;
-        size_t stotal = slabs_space_size(do_htree_elem_ntotal(elem));
-        do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, stotal);
-    }
-    return ENGINE_SUCCESS;
+    map_elem_link_ctx lctx = { info, replaced };
+    return do_htree_elem_insert(&info->root, (htree_elem_item *)elem,
+                                elem->data, elem->nfield,
+                                replace_if_exist,
+                                map_elem_on_insert, map_elem_on_replace,
+                                map_node_on_insert, &lctx, cookie);
 }
 
 static void map_elem_on_delete(htree_elem_item *elem,
@@ -328,7 +331,8 @@ static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
             pinfo.node->htab[pinfo.hidx] = new_elem;
         new_elem->status = ELEM_STATUS_LINKED;
         elem->status = ELEM_STATUS_UNLINKED;
-        map_elem_on_replace((htree_elem_item *)elem, (htree_elem_item *)new_elem, info);
+        map_elem_link_ctx lctx = { info, NULL };
+        map_elem_on_replace((htree_elem_item *)elem, (htree_elem_item *)new_elem, &lctx);
     }
 
     return ENGINE_SUCCESS;

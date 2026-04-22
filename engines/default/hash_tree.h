@@ -53,6 +53,8 @@ typedef void (*htree_elem_delete_cb)(htree_elem_item *elem,
 
 typedef void (*htree_node_remove_cb)(void *ctx);
 
+typedef void (*htree_elem_insert_cb)(htree_elem_item *new_elem, void *ctx);
+
 typedef void (*htree_elem_replace_cb)(htree_elem_item *old_elem,
                                       htree_elem_item *new_elem, void *ctx);
 
@@ -96,6 +98,7 @@ ENGINE_ERROR_CODE do_htree_elem_insert(htree_hash_node **root,
                                     htree_elem_item *elem,
                                     const void *key, size_t klen,
                                     bool replace_if_exist,
+                                    htree_elem_insert_cb on_elem_insert,
                                     htree_elem_replace_cb on_elem_replace,
                                     htree_node_insert_cb on_node_insert,
                                     void *ctx, const void *cookie);

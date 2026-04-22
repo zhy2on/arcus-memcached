@@ -185,6 +185,14 @@ static void do_set_node_unlink(set_meta_info *info,
     }
 }
 
+static void set_elem_on_insert(htree_elem_item *elem, void *ctx)
+{
+    set_meta_info *info = (set_meta_info *)ctx;
+    info->ccnt++;
+    size_t stotal = slabs_space_size(do_htree_elem_ntotal(elem));
+    do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
+}
+
 static void set_node_on_insert(void *ctx)
 {
     set_meta_info *info = (set_meta_info *)ctx;
@@ -196,18 +204,10 @@ static ENGINE_ERROR_CODE do_set_elem_link(set_meta_info *info, set_elem_item *el
                                           const void *cookie)
 {
     assert(info->root != NULL);
-    ENGINE_ERROR_CODE ret;
-
-    ret = do_htree_elem_insert(&info->root, (htree_elem_item *)elem,
-                            elem->data, elem->nbytes,
-                            false, NULL, set_node_on_insert, info, cookie);
-    if (ret != ENGINE_SUCCESS)
-        return ret;
-
-    info->ccnt++;
-    size_t stotal = slabs_space_size(do_htree_elem_ntotal(elem));
-    do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
-    return ENGINE_SUCCESS;
+    return do_htree_elem_insert(&info->root, (htree_elem_item *)elem,
+                                elem->data, elem->nbytes,
+                                false, set_elem_on_insert, NULL,
+                                set_node_on_insert, info, cookie);
 }
 
 static void set_elem_on_delete(htree_elem_item *elem,
