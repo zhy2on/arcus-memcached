@@ -51,19 +51,24 @@ void              do_htree_node_remove(htree_hash_node **root,
 typedef void (*htree_elem_delete_cb)(htree_elem_item *elem,
                                      enum elem_delete_cause cause, void *ctx);
 
+typedef void (*htree_node_remove_cb)(void *ctx);
+
 int               do_htree_traverse_sampling(htree_hash_node *node,
                                              uint32_t remain, const uint32_t count,
                                              htree_elem_item **elem_array);
+
 htree_elem_item  *do_htree_elem_at_offset(htree_hash_node **root,
                                           htree_hash_node *node,
                                           uint32_t offset, const bool delete,
-                                          htree_elem_delete_cb on_delete, void *ctx);
+                                          htree_elem_delete_cb on_delete,
+                                          htree_node_remove_cb on_node_remove, void *ctx);
 
 int               do_htree_traverse_dfs_bycnt(htree_hash_node **root,
                                               htree_hash_node *node,
                                               const uint32_t count, const bool delete,
                                               htree_elem_item **elem_array,
                                               htree_elem_delete_cb on_delete,
+                                              htree_node_remove_cb on_node_remove,
                                               enum elem_delete_cause cause, void *ctx);
 
 bool              do_htree_traverse_dfs_byfield(htree_hash_node **root,
@@ -73,6 +78,7 @@ bool              do_htree_traverse_dfs_byfield(htree_hash_node **root,
                                                const bool delete,
                                                htree_elem_item **elem_array,
                                                htree_elem_delete_cb on_delete,
+                                               htree_node_remove_cb on_node_remove,
                                                void *ctx);
 
 void              do_htree_elem_remove(htree_hash_node *node, const int hidx,
