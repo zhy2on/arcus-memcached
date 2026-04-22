@@ -23,6 +23,8 @@
 #include "default_engine.h"
 #include "hash_tree.h"
 
+extern int genhash_string_hash(const void *p, size_t nkey);
+
 htree_hash_node *do_htree_node_alloc(uint8_t hash_depth, const void *cookie)
 {
     size_t ntotal = sizeof(htree_hash_node);
@@ -132,4 +134,37 @@ void do_htree_node_unlink(htree_hash_node **root,
     par_node->hcnt[par_hidx] = fcnt;
 
     do_htree_node_free(node);
+}
+
+htree_elem_item *do_htree_elem_find(htree_hash_node *root,
+                                    const void *key, size_t klen,
+                                    htree_elem_match_func match_func,
+                                    htree_prev_info *pinfo)
+{
+    uint32_t hval = (uint32_t)genhash_string_hash(key, klen);
+    htree_hash_node *node = root;
+    htree_elem_item *elem = NULL;
+    htree_elem_item *prev = NULL;
+    int hidx = -1;
+
+    while (node != NULL) {
+        hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
+        if (node->hcnt[hidx] >= 0)
+            break;
+        node = (htree_hash_node *)node->htab[hidx];
+    }
+    assert(node != NULL);
+
+    for (elem = (htree_elem_item *)node->htab[hidx]; elem != NULL; elem = elem->next) {
+        if (elem->hval == hval && match_func(elem, key, klen)) {
+            if (pinfo != NULL) {
+                pinfo->node = node;
+                pinfo->prev = prev;
+                pinfo->hidx = hidx;
+            }
+            break;
+        }
+        prev = elem;
+    }
+    return elem;
 }

@@ -56,18 +56,10 @@ static inline void UNLOCK_CACHE(void)
 /*
  * MAP collection manangement
  */
-/* map element previous info internally used */
-typedef struct _map_prev_info {
-    map_hash_node *node;
-    map_elem_item *prev;
-    uint16_t       hidx;
-} map_prev_info;
-
-
-static inline int map_hash_eq(const int h1, const void *v1, size_t vlen1,
-                              const int h2, const void *v2, size_t vlen2)
+static bool map_elem_match(const htree_elem_item *elem, const void *key, size_t klen)
 {
-    return (h1 == h2 && vlen1 == vlen2 && memcmp(v1, v2, vlen1) == 0);
+    map_elem_item *me = (map_elem_item *)elem;
+    return (me->nfield == klen && memcmp(me->data, key, klen) == 0);
 }
 
 static inline uint32_t do_map_elem_ntotal(map_elem_item *elem)
@@ -197,9 +189,9 @@ static void do_map_node_unlink(map_meta_info *info,
 }
 
 static void do_map_elem_replace(map_meta_info *info,
-                                map_prev_info *pinfo, map_elem_item *new_elem)
+                                htree_prev_info *pinfo, map_elem_item *new_elem)
 {
-    map_elem_item *prev = pinfo->prev;
+    map_elem_item *prev = (map_elem_item *)pinfo->prev;
     map_elem_item *old_elem;
     size_t old_stotal;
     size_t new_stotal;
@@ -246,7 +238,7 @@ static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *el
     map_hash_node *node = info->root;
     map_elem_item *prev = NULL;
     map_elem_item *find;
-    map_prev_info pinfo;
+    htree_prev_info pinfo;
     ENGINE_ERROR_CODE res = ENGINE_SUCCESS;
 
     int hidx = -1;
@@ -262,8 +254,8 @@ static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *el
     }
     assert(node != NULL);
     for (find = node->htab[hidx]; find != NULL; find = find->next) {
-        if (map_hash_eq(elem->hval, elem->data, elem->nfield,
-                        find->hval, find->data, find->nfield))
+        if (map_elem_match((htree_elem_item *)find, elem->data, elem->nfield)
+            && find->hval == elem->hval)
             break;
         prev = find;
     }
@@ -280,7 +272,7 @@ static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *el
             }
 #endif
             pinfo.node = node;
-            pinfo.prev = prev;
+            pinfo.prev = (htree_elem_item *)prev;
             pinfo.hidx = hidx;
             do_map_elem_replace(info, &pinfo, elem);
             if (replaced) *replaced = true;
@@ -388,7 +380,7 @@ static bool do_map_elem_traverse_dfs_byfield(map_meta_info *info, map_hash_node 
             map_elem_item *prev = NULL;
             map_elem_item *elem = node->htab[hidx];
             while (elem != NULL) {
-                if (map_hash_eq(hval, field->value, field->length, elem->hval, elem->data, elem->nfield)) {
+                if (elem->hval == hval && map_elem_match((htree_elem_item *)elem, field->value, field->length)) {
                     if (elem_array) {
                         elem->refcount++;
                         elem_array[0] = elem;
@@ -473,39 +465,18 @@ static uint32_t do_map_elem_delete_with_field(map_meta_info *info, const int num
     return delcnt;
 }
 
-static map_elem_item *do_map_elem_find(map_hash_node *node, const field_t *field, map_prev_info *pinfo)
+static map_elem_item *do_map_elem_find(map_hash_node *root, const field_t *field, htree_prev_info *pinfo)
 {
-    map_elem_item *elem = NULL;
-    map_elem_item *prev = NULL;
-    int hval = genhash_string_hash(field->value, field->length);
-    int hidx = -1;
-
-    while (node != NULL) {
-        hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
-        if (node->hcnt[hidx] >= 0) /* map element hash chain */
-            break;
-        node = node->htab[hidx];
-    }
-    assert(node != NULL);
-    for (elem = node->htab[hidx]; elem != NULL; elem = elem->next) {
-        if (map_hash_eq(hval, field->value, field->length, elem->hval, elem->data, elem->nfield)) {
-            if (pinfo != NULL) {
-                pinfo->node = node;
-                pinfo->prev = prev;
-                pinfo->hidx = hidx;
-            }
-            break;
-        }
-        prev = elem;
-    }
-    return elem;
+    return (map_elem_item *)do_htree_elem_find(root,
+                                               field->value, field->length,
+                                               map_elem_match, pinfo);
 }
 
 static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
                                             const field_t *field, const char *value,
                                             const uint32_t nbytes, const void *cookie)
 {
-    map_prev_info  pinfo;
+    htree_prev_info  pinfo;
     map_elem_item *elem;
 
     if (info->root == NULL) {

@@ -103,10 +103,10 @@ static bool hash_insert(hash_table *ht, int key)
  * SET collection manangement
  */
 
-static inline int set_hash_eq(const int h1, const void *v1, size_t vlen1,
-                              const int h2, const void *v2, size_t vlen2)
+static bool set_elem_match(const htree_elem_item *elem, const void *key, size_t klen)
 {
-    return (h1 == h2 && vlen1 == vlen2 && memcmp(v1, v2, vlen1) == 0);
+    set_elem_item *se = (set_elem_item *)elem;
+    return (se->nbytes == klen && memcmp(se->value, key, klen) == 0);
 }
 
 static inline uint32_t do_set_elem_ntotal(set_elem_item *elem)
@@ -256,8 +256,7 @@ static ENGINE_ERROR_CODE do_set_elem_link(set_meta_info *info, set_elem_item *el
     assert(hidx != -1);
 
     for (find = node->htab[hidx]; find != NULL; find = find->next) {
-        if (set_hash_eq(elem->hval, elem->value, elem->nbytes,
-                        find->hval, find->value, find->nbytes))
+        if (find->hval == elem->hval && set_elem_match((htree_elem_item *)find, elem->value, elem->nbytes))
             break;
     }
     if (find != NULL) {
@@ -324,27 +323,10 @@ static void do_set_elem_unlink(set_meta_info *info,
 
 static set_elem_item *do_set_elem_find(set_meta_info *info, const char *val, const int vlen)
 {
-    set_elem_item *elem = NULL;
-
-    if (info->root != NULL) {
-        set_hash_node *node = info->root;
-        int hval = genhash_string_hash(val, vlen);
-        int hidx = 0;
-
-        while (node != NULL) {
-            hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
-            if (node->hcnt[hidx] >= 0) /* set element hash chain */
-                break;
-            node = node->htab[hidx];
-        }
-        assert(node != NULL);
-
-        for (elem = node->htab[hidx]; elem != NULL; elem = elem->next) {
-            if (set_hash_eq(hval, val, vlen, elem->hval, elem->value, elem->nbytes))
-                break;
-        }
-    }
-    return elem;
+    if (info->root == NULL)
+        return NULL;
+    return (set_elem_item *)do_htree_elem_find(info->root, val, vlen,
+                                               set_elem_match, NULL);
 }
 
 static ENGINE_ERROR_CODE do_set_elem_traverse_delete(set_meta_info *info, set_hash_node *node,
@@ -370,7 +352,7 @@ static ENGINE_ERROR_CODE do_set_elem_traverse_delete(set_meta_info *info, set_ha
             set_elem_item *prev = NULL;
             set_elem_item *elem = node->htab[hidx];
             while (elem != NULL) {
-                if (set_hash_eq(hval, val, vlen, elem->hval, elem->value, elem->nbytes))
+                if (elem->hval == hval && set_elem_match((htree_elem_item *)elem, val, vlen))
                     break;
                 prev = elem;
                 elem = elem->next;
