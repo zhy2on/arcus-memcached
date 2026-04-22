@@ -254,6 +254,101 @@ ENGINE_ERROR_CODE do_htree_elem_link(htree_hash_node **root,
     return ENGINE_SUCCESS;
 }
 
+int do_htree_traverse_dfs_bycnt(htree_hash_node **root,
+                                htree_hash_node *node,
+                                const uint32_t count, const bool delete,
+                                htree_elem_item **elem_array,
+                                htree_elem_delete_cb on_delete,
+                                enum elem_delete_cause cause, void *ctx)
+{
+    int hidx;
+    int fcnt = 0;
+
+    for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
+        if (node->hcnt[hidx] == -1) {
+            htree_hash_node *child_node = (htree_hash_node *)node->htab[hidx];
+            int rcnt = (count > 0 ? (count - fcnt) : 0);
+            int child_fcnt = do_htree_traverse_dfs_bycnt(root, child_node, rcnt, delete,
+                                                         (elem_array==NULL ? NULL : &elem_array[fcnt]),
+                                                         on_delete, cause, ctx);
+            fcnt += child_fcnt;
+            if (delete && child_fcnt > 0) {
+                if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2) &&
+                    do_htree_node_is_leaf(child_node)) {
+                    do_htree_node_unlink(root, node, hidx);
+                }
+                node->tot_elem_cnt -= child_fcnt;
+            }
+        } else if (node->hcnt[hidx] > 0) {
+            htree_elem_item *elem = node->htab[hidx];
+            while (elem != NULL) {
+                if (elem_array) {
+                    elem->refcount++;
+                    elem_array[fcnt] = elem;
+                }
+                fcnt++;
+                if (delete) {
+                    do_htree_elem_unlink(node, hidx, NULL, elem);
+                    if (on_delete) on_delete(elem, cause, ctx);
+                }
+                if (count > 0 && fcnt >= count) break;
+                elem = (delete ? node->htab[hidx] : elem->next);
+            }
+        }
+        if (count > 0 && fcnt >= count) break;
+    }
+    return fcnt;
+}
+
+bool do_htree_traverse_dfs_byfield(htree_hash_node **root,
+                                   htree_hash_node *node,
+                                   const uint32_t hval,
+                                   const void *key, const size_t klen,
+                                   const bool delete,
+                                   htree_elem_item **elem_array,
+                                   htree_elem_delete_cb on_delete,
+                                   void *ctx)
+{
+    bool ret;
+    int hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
+
+    if (node->hcnt[hidx] == -1) {
+        htree_hash_node *child_node = node->htab[hidx];
+        ret = do_htree_traverse_dfs_byfield(root, child_node, hval, key, klen,
+                                            delete, elem_array, on_delete, ctx);
+        if (ret && delete) {
+            if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2) &&
+                do_htree_node_is_leaf(child_node)) {
+                do_htree_node_unlink(root, node, hidx);
+            }
+            node->tot_elem_cnt -= 1;
+        }
+    } else {
+        ret = false;
+        if (node->hcnt[hidx] > 0) {
+            htree_elem_item *prev = NULL;
+            htree_elem_item *elem = node->htab[hidx];
+            while (elem != NULL) {
+                if (elem->hval == hval && htree_elem_match(elem, key, klen)) {
+                    if (elem_array) {
+                        elem->refcount++;
+                        elem_array[0] = elem;
+                    }
+                    if (delete) {
+                        do_htree_elem_unlink(node, hidx, prev, elem);
+                        if (on_delete) on_delete(elem, ELEM_DELETE_NORMAL, ctx);
+                    }
+                    ret = true;
+                    break;
+                }
+                prev = elem;
+                elem = elem->next;
+            }
+        }
+    }
+    return ret;
+}
+
 void do_htree_elem_unlink(htree_hash_node *node, const int hidx,
                           htree_elem_item *prev, htree_elem_item *elem)
 {

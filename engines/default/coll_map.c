@@ -268,17 +268,15 @@ static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *el
     return ENGINE_SUCCESS;
 }
 
-static void do_map_elem_unlink(map_meta_info *info,
-                               map_hash_node *node, const int hidx,
-                               map_elem_item *prev, map_elem_item *elem,
-                               enum elem_delete_cause cause)
+static void map_elem_on_delete(htree_elem_item *elem,
+                               enum elem_delete_cause cause, void *ctx)
 {
-    do_htree_elem_unlink(node, hidx, prev, elem);
+    map_meta_info *info = (map_meta_info *)ctx;
     info->ccnt--;
 
     CLOG_MAP_ELEM_DELETE(info, elem, cause);
 
-    if (info->stotal > 0) { /* apply memory space */
+    if (info->stotal > 0) {
         size_t stotal = slabs_space_size(do_htree_elem_ntotal(elem));
         do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, stotal);
     }
@@ -288,87 +286,6 @@ static void do_map_elem_unlink(map_meta_info *info,
     }
 }
 
-static bool do_map_elem_traverse_dfs_byfield(map_meta_info *info, map_hash_node *node, const int hval,
-                                             const field_t *field, const bool delete,
-                                             map_elem_item **elem_array)
-{
-    bool ret;
-    int hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
-
-    if (node->hcnt[hidx] == -1) {
-        map_hash_node *child_node = node->htab[hidx];
-        ret = do_map_elem_traverse_dfs_byfield(info, child_node, hval, field, delete, elem_array);
-        if (ret && delete) {
-            if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2) &&
-                do_htree_node_is_leaf(child_node)) {
-                do_map_node_unlink(info, node, hidx);
-            }
-            node->tot_elem_cnt -= 1;
-        }
-    } else {
-        ret = false;
-        if (node->hcnt[hidx] > 0) {
-            map_elem_item *prev = NULL;
-            map_elem_item *elem = node->htab[hidx];
-            while (elem != NULL) {
-                if (elem->hval == hval && elem->nfield == field->length && memcmp(elem->data, field->value, field->length) == 0) {
-                    if (elem_array) {
-                        elem->refcount++;
-                        elem_array[0] = elem;
-                    }
-
-                    if (delete) {
-                        do_map_elem_unlink(info, node, hidx, prev, elem, ELEM_DELETE_NORMAL);
-                    }
-                    ret = true;
-                    break;
-                }
-                prev = elem;
-                elem = elem->next;
-            }
-        }
-    }
-    return ret;
-}
-
-static int do_map_elem_traverse_dfs_bycnt(map_meta_info *info, map_hash_node *node,
-                                          const uint32_t count, const bool delete,
-                                          map_elem_item **elem_array, enum elem_delete_cause cause)
-{
-    int hidx;
-    int fcnt = 0; /* found count */
-
-    for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
-        if (node->hcnt[hidx] == -1) {
-            map_hash_node *child_node = (map_hash_node *)node->htab[hidx];
-            int rcnt = (count > 0 ? (count - fcnt) : 0);
-            int child_fcnt = do_map_elem_traverse_dfs_bycnt(info, child_node, rcnt, delete,
-                                                            (elem_array==NULL ? NULL : &elem_array[fcnt]), cause);
-            fcnt += child_fcnt;
-            if (delete && child_fcnt > 0) {
-                if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2) &&
-                    do_htree_node_is_leaf(child_node)) {
-                    do_map_node_unlink(info, node, hidx);
-                }
-                node->tot_elem_cnt -= child_fcnt;
-            }
-        } else if (node->hcnt[hidx] > 0) {
-            map_elem_item *elem = node->htab[hidx];
-            while (elem != NULL) {
-                if (elem_array) {
-                    elem->refcount++;
-                    elem_array[fcnt] = elem;
-                }
-                fcnt++;
-                if (delete) do_map_elem_unlink(info, node, hidx, NULL, elem, cause);
-                if (count > 0 && fcnt >= count) break;
-                elem = (delete ? node->htab[hidx] : elem->next);
-            }
-        }
-        if (count > 0 && fcnt >= count) break;
-    }
-    return fcnt;
-}
 
 static uint32_t do_map_elem_delete_with_field(map_meta_info *info, const int numfields,
                                               const field_t *flist, enum elem_delete_cause cause)
@@ -379,11 +296,14 @@ static uint32_t do_map_elem_delete_with_field(map_meta_info *info, const int num
     if (info->root != NULL) {
         CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, numfields, cause);
         if (numfields == 0) {
-            delcnt = do_map_elem_traverse_dfs_bycnt(info, info->root, 0, true, NULL, cause);
+            delcnt = do_htree_traverse_dfs_bycnt(&info->root, info->root, 0, true, NULL,
+                                                 map_elem_on_delete, cause, info);
         } else {
             for (int ii = 0; ii < numfields; ii++) {
                 int hval = genhash_string_hash(flist[ii].value, flist[ii].length);
-                if (do_map_elem_traverse_dfs_byfield(info, info->root, hval, &flist[ii], true, NULL)) {
+                if (do_htree_traverse_dfs_byfield(&info->root, info->root, hval,
+                                                  flist[ii].value, flist[ii].length,
+                                                  true, NULL, map_elem_on_delete, info)) {
                     delcnt++;
                 }
             }
@@ -449,7 +369,8 @@ static uint32_t do_map_elem_delete(map_meta_info *info, const uint32_t count,
     assert(cause == ELEM_DELETE_COLL);
     uint32_t fcnt = 0;
     if (info->root != NULL) {
-        fcnt = do_map_elem_traverse_dfs_bycnt(info, info->root, count, true, NULL, cause);
+        fcnt = do_htree_traverse_dfs_bycnt(&info->root, info->root, count, true, NULL,
+                                           map_elem_on_delete, cause, info);
         if (info->root->tot_elem_cnt == 0) {
             do_map_node_unlink(info, NULL, 0);
         }
@@ -468,13 +389,17 @@ static uint32_t do_map_elem_get(map_meta_info *info,
         CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, numfields, ELEM_DELETE_NORMAL);
     }
     if (numfields == 0) {
-        fcnt = do_map_elem_traverse_dfs_bycnt(info, info->root, 0, delete,
-                                              elem_array, ELEM_DELETE_NORMAL);
+        fcnt = do_htree_traverse_dfs_bycnt(&info->root, info->root, 0, delete,
+                                           elem_array,
+                                           (delete ? map_elem_on_delete : NULL),
+                                           ELEM_DELETE_NORMAL, info);
     } else {
         for (int ii = 0; ii < numfields; ii++) {
             int hval = genhash_string_hash(flist[ii].value, flist[ii].length);
-            if (do_map_elem_traverse_dfs_byfield(info, info->root, hval, &flist[ii],
-                                                 delete, &elem_array[fcnt])) {
+            if (do_htree_traverse_dfs_byfield(&info->root, info->root, hval,
+                                              flist[ii].value, flist[ii].length,
+                                              delete, &elem_array[fcnt],
+                                              (delete ? map_elem_on_delete : NULL), info)) {
                 fcnt++;
             }
         }
