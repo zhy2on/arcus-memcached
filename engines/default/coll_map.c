@@ -559,75 +559,14 @@ ENGINE_ERROR_CODE map_elem_get(const char *key, const uint32_t nkey,
     return ret;
 }
 
-/* See do_map_elem_traverse_dfs and do_map_elem_link. do_map_elem_traverse_dfs
- * can visit all elements, but only supports get and delete operations.
- * Do something similar and visit all elements.
- */
 void map_elem_get_all(map_meta_info *info, elems_result_t *eresult)
 {
-    assert(eresult->elem_arrsz >= info->ccnt && eresult->elem_count == 0);
-    map_hash_node *node;
-    map_elem_item *elem;
-    int cur_depth, i;
-    bool push;
-
-    /* Temporay stack we use to do dfs. Static is ugly but is okay...
-     * This function runs with the cache lock acquired.
-     */
-    static int stack_max = 0;
-    static struct _map_hash_posi {
-        map_hash_node *node;
-        int idx;
-    } *stack = NULL;
-
-    node = info->root;
-    cur_depth = 0;
-    push = true;
-    while (node != NULL) {
-        if (push) {
-            push = false;
-            if (stack_max <= cur_depth) {
-                struct _map_hash_posi *tmp;
-                stack_max += 16;
-                tmp = realloc(stack, sizeof(*stack) * stack_max);
-                assert(tmp != NULL);
-                stack = tmp;
-            }
-            stack[cur_depth].node = node;
-            stack[cur_depth].idx = 0;
-        }
-
-        /* Scan the current node */
-        for (i = stack[cur_depth].idx; i < HTREE_HASHTAB_SIZE; i++) {
-            if (node->hcnt[i] >= 0) {
-                /* Hash chain.  Insert all elements on the chain into the
-                 * to-be-copied list.
-                 */
-                for (elem = node->htab[i]; elem != NULL; elem = elem->next) {
-                    elem->refcount++;
-                    eresult->elem_array[eresult->elem_count++] = elem;
-                }
-            }
-            else if (node->htab[i] != NULL) {
-                /* Another hash node.  Go down */
-                stack[cur_depth].idx = i+1;
-                push = true;
-                node = node->htab[i];
-                cur_depth++;
-                break;
-            }
-        }
-
-        /* Scannned everything in this node.  Go up. */
-        if (i >= HTREE_HASHTAB_SIZE) {
-            cur_depth--;
-            if (cur_depth < 0)
-                node = NULL; /* done */
-            else
-                node = stack[cur_depth].node;
-        }
-    }
-    assert(eresult->elem_count == info->ccnt);
+    assert(eresult->elem_arrsz >= (uint32_t)info->ccnt && eresult->elem_count == 0);
+    eresult->elem_count = htree_traverse_dfs_bycnt(&info->root, info->root,
+                                                   0, false,
+                                                   (htree_elem_item **)eresult->elem_array,
+                                                   NULL, ELEM_DELETE_NORMAL, NULL);
+    assert(eresult->elem_count == (uint32_t)info->ccnt);
 }
 
 ENGINE_ERROR_CODE map_coll_getattr(hash_item *it, item_attr *attrp,

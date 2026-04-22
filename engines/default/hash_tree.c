@@ -199,6 +199,16 @@ static inline bool htree_elem_match(const htree_elem_item *elem,
     return (elem->nbytes == klen && memcmp(elem->data, key, klen) == 0);
 }
 
+static void do_htree_elem_delete(htree_hash_node *node, const int hidx,
+                                 htree_elem_item *prev, htree_elem_item *elem)
+{
+    if (prev != NULL) prev->next = elem->next;
+    else              node->htab[hidx] = elem->next;
+    elem->status = ELEM_STATUS_UNLINKED;
+    node->hcnt[hidx] -= 1;
+    node->tot_elem_cnt -= 1;
+}
+
 ENGINE_ERROR_CODE htree_elem_insert(htree_hash_node **root,
                                     htree_elem_item *elem,
                                     const void *key, size_t klen,
@@ -498,15 +508,6 @@ bool htree_traverse_dfs_byfield(htree_hash_node **root,
                                          delete, elem_array, on_elem_delete, meta);
 }
 
-static void do_htree_elem_delete(htree_hash_node *node, const int hidx,
-                          htree_elem_item *prev, htree_elem_item *elem)
-{
-    if (prev != NULL) prev->next = elem->next;
-    else              node->htab[hidx] = elem->next;
-    elem->status = ELEM_STATUS_UNLINKED;
-    node->hcnt[hidx] -= 1;
-    node->tot_elem_cnt -= 1;
-}
 
 htree_elem_item *htree_elem_find(htree_hash_node *root,
                                     const void *key, size_t klen)
