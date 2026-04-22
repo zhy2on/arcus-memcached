@@ -42,6 +42,9 @@ void              do_htree_node_link(htree_hash_node **root,
 void              do_htree_node_unlink(htree_hash_node **root,
                                        htree_hash_node *par_node, int par_hidx);
 
+void              do_htree_elem_unlink(htree_hash_node *node, const int hidx,
+                                       htree_elem_item *prev, htree_elem_item *elem);
+
 htree_elem_item  *do_htree_elem_find(htree_hash_node *root,
                                      const void *key, size_t klen,
                                      htree_prev_info *pinfo);

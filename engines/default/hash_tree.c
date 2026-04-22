@@ -254,10 +254,22 @@ ENGINE_ERROR_CODE do_htree_elem_link(htree_hash_node **root,
     return ENGINE_SUCCESS;
 }
 
+void do_htree_elem_unlink(htree_hash_node *node, const int hidx,
+                          htree_elem_item *prev, htree_elem_item *elem)
+{
+    if (prev != NULL) prev->next = elem->next;
+    else              node->htab[hidx] = elem->next;
+    elem->status = ELEM_STATUS_UNLINKED;
+    node->hcnt[hidx] -= 1;
+    node->tot_elem_cnt -= 1;
+}
+
 htree_elem_item *do_htree_elem_find(htree_hash_node *root,
                                     const void *key, size_t klen,
                                     htree_prev_info *pinfo)
 {
+    if (root == NULL) return NULL;
+
     uint32_t hval = (uint32_t)genhash_string_hash(key, klen);
     htree_hash_node *node = root;
     htree_elem_item *elem = NULL;

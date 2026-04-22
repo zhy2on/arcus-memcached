@@ -220,11 +220,7 @@ static void do_set_elem_unlink(set_meta_info *info,
                                set_elem_item *prev, set_elem_item *elem,
                                enum elem_delete_cause cause)
 {
-    if (prev != NULL) prev->next = elem->next;
-    else              node->htab[hidx] = elem->next;
-    elem->status = ELEM_STATUS_UNLINKED;
-    node->hcnt[hidx] -= 1;
-    node->tot_elem_cnt -= 1;
+    do_htree_elem_unlink(node, hidx, prev, elem);
     info->ccnt--;
 
     CLOG_SET_ELEM_DELETE(info, elem, cause);
@@ -241,8 +237,6 @@ static void do_set_elem_unlink(set_meta_info *info,
 
 static set_elem_item *do_set_elem_find(set_meta_info *info, const char *val, const int vlen)
 {
-    if (info->root == NULL)
-        return NULL;
     return (set_elem_item *)do_htree_elem_find(info->root, val, vlen, NULL);
 }
 

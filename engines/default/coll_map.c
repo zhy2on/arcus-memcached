@@ -273,11 +273,7 @@ static void do_map_elem_unlink(map_meta_info *info,
                                map_elem_item *prev, map_elem_item *elem,
                                enum elem_delete_cause cause)
 {
-    if (prev != NULL) prev->next = elem->next;
-    else              node->htab[hidx] = elem->next;
-    elem->status = ELEM_STATUS_UNLINKED;
-    node->hcnt[hidx] -= 1;
-    node->tot_elem_cnt -= 1;
+    do_htree_elem_unlink(node, hidx, prev, elem);
     info->ccnt--;
 
     CLOG_MAP_ELEM_DELETE(info, elem, cause);
@@ -407,10 +403,6 @@ static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
 {
     htree_prev_info  pinfo;
     map_elem_item *elem;
-
-    if (info->root == NULL) {
-        return ENGINE_ELEM_ENOENT;
-    }
 
     elem = do_map_elem_find(info->root, field, &pinfo);
     if (elem == NULL) {
