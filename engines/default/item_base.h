@@ -231,19 +231,22 @@ typedef struct _list_meta_info {
 #define HTREE_GET_HASHIDX(hval, hdepth) \
         (((hval) & (HTREE_HASHIDX_MASK << ((hdepth)*4))) >> ((hdepth)*4))
 
-/* set meta info */
-#define SET_HASHTAB_SIZE       HTREE_HASHTAB_SIZE
-#define SET_HASHIDX_MASK       HTREE_HASHIDX_MASK
-#define SET_MAX_HASHCHAIN_SIZE HTREE_MAX_HASHCHAIN_SIZE
-
-typedef struct _set_hash_node {
+/* hash tree node (shared by set and map) */
+typedef struct _htree_hash_node {
     uint16_t refcount;
     uint8_t  slabs_clsid;         /* which slab class we're in */
     uint8_t  hdepth;
     uint32_t tot_elem_cnt;
     int16_t  hcnt[HTREE_HASHTAB_SIZE];
     void    *htab[HTREE_HASHTAB_SIZE];
-} set_hash_node;
+} htree_hash_node;
+
+/* set meta info */
+#define SET_HASHTAB_SIZE       HTREE_HASHTAB_SIZE
+#define SET_HASHIDX_MASK       HTREE_HASHIDX_MASK
+#define SET_MAX_HASHCHAIN_SIZE HTREE_MAX_HASHCHAIN_SIZE
+
+typedef htree_hash_node set_hash_node;
 
 typedef struct _set_meta_info {
     int32_t  mcnt;      /* maximum count */
@@ -260,15 +263,7 @@ typedef struct _set_meta_info {
 #define MAP_HASHIDX_MASK       HTREE_HASHIDX_MASK
 #define MAP_MAX_HASHCHAIN_SIZE HTREE_MAX_HASHCHAIN_SIZE
 
-typedef struct _map_hash_node {
-    uint16_t refcount;
-    uint8_t  slabs_clsid;         /* which slab class we're in */
-    uint8_t  hdepth;
-    uint16_t cur_elem_cnt;
-    uint16_t cur_hash_cnt;
-    int16_t  hcnt[HTREE_HASHTAB_SIZE];
-    void    *htab[HTREE_HASHTAB_SIZE];
-} map_hash_node;
+typedef htree_hash_node map_hash_node;
 
 typedef struct _map_meta_info {
     int32_t  mcnt;      /* maximum count */
