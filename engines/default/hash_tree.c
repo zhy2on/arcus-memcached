@@ -21,7 +21,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "default_engine.h"
+#include "item_base.h"
+#include "slabs.h"
 #include "hash_tree.h"
 
 extern int genhash_string_hash(const void *p, size_t nkey);
