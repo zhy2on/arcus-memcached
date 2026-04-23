@@ -317,7 +317,10 @@ static ENGINE_ERROR_CODE do_map_elem_insert(hash_item *it, map_elem_item *elem,
         new_root_flag = true;
     }
 
-    /* pre-check: overflow and sticky */
+    /* pre-check: overflow and sticky.
+     * For upsert (replace_if_exist=true), overflow applies only when inserting a new field. */
+    bool is_new_field = !replace_if_exist ||
+                        htree_elem_find(info->root, elem->data, elem->nfield) == NULL;
 #ifdef ENABLE_STICKY_ITEM
     if (IS_STICKY_COLLFLG(info)) {
         if (do_item_sticky_overflowed()) {
@@ -329,7 +332,7 @@ static ENGINE_ERROR_CODE do_map_elem_insert(hash_item *it, map_elem_item *elem,
         }
     }
 #endif
-    if (!replace_if_exist) {
+    if (is_new_field) {
         assert(info->ovflact == OVFL_ERROR);
         if (info->ccnt >= (info->mcnt > 0 ? info->mcnt : config->max_map_size)) {
             if (new_root_flag) {
