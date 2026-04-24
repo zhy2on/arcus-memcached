@@ -1901,17 +1901,17 @@ get_elem_info(ENGINE_HANDLE *handle, const void *cookie,
         elem_info->nbytes = elem->nbytes;
         elem_info->nvalue = elem->nbytes;
         elem_info->naddnl = 0;
-        elem_info->value = elem->value;
+        elem_info->value = (const char*)elem->data;
         elem_info->addnl = NULL;
     }
     else if (type == ITEM_TYPE_MAP) {
         map_elem_item *elem = (map_elem_item*)eitem;
-        elem_info->nscore = elem->nfield;
-        elem_info->nbytes = elem->nbytes;
-        elem_info->nvalue = elem->nbytes;
+        elem_info->nscore = elem->nkey;
+        elem_info->nbytes = elem->nbytes - elem->nkey;
+        elem_info->nvalue = elem->nbytes - elem->nkey;
         elem_info->naddnl = 0;
         elem_info->score = elem->data;
-        elem_info->value = (const char*)elem->data + elem->nfield;
+        elem_info->value = (const char*)elem->data + elem->nkey;
         elem_info->addnl = NULL;
     }
     else if (type == ITEM_TYPE_BTREE) {
