@@ -169,6 +169,7 @@ default_engine_la_SOURCES= \
                     engines/default/items.h \
                     engines/default/item_clog.c \
                     engines/default/item_clog.h \
+                    engines/default/hash_tree.h \
                     engines/default/item_base.c \
                     engines/default/item_base.h \
                     engines/default/coll_list.c \
