@@ -579,32 +579,18 @@ static ENGINE_ERROR_CODE do_set_elem_insert(hash_item *it, set_elem_item *elem,
                                             const void *cookie)
 {
     set_meta_info *info = (set_meta_info *)item_get_meta(it);
-    uint32_t real_mcnt = (info->mcnt > 0 ? info->mcnt : config->max_set_size);
+    int real_mcnt = (int)(info->mcnt > 0 ? info->mcnt : config->max_set_size);
+    bool is_sticky = IS_STICKY_EXPTIME(it->exptime);
     ENGINE_ERROR_CODE ret;
-
-#ifdef ENABLE_STICKY_ITEM
-    /* sticky memory limit check */
-    if (IS_STICKY_EXPTIME(it->exptime)) {
-        if (do_item_sticky_overflowed())
-            return ENGINE_ENOMEM;
-    }
-#endif
-
-    /* overflow check */
-    assert(info->ovflact == OVFL_ERROR);
-    if (info->ccnt >= real_mcnt) {
-        return ENGINE_EOVERFLOW;
-    }
 
     ssize_t space_delta = 0;
     ret = htree_elem_insert((htree_node **)&info->root,
                             (htree_elem_item *)elem,
-                            false, NULL, &space_delta, cookie);
+                            false, is_sticky, real_mcnt, NULL, &space_delta, cookie);
     if (ret != ENGINE_SUCCESS)
         return ret;
 
     info->ccnt++;
-    /* set never replaces, so space_delta is always positive */
     do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_SET, (size_t)space_delta);
     CLOG_SET_ELEM_INSERT(info, elem);
     return ENGINE_SUCCESS;

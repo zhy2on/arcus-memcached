@@ -70,7 +70,14 @@ typedef struct _htree_node {
  * If replace_if_exist is false and a duplicate is found, ENGINE_ELEM_EEXISTS
  * is returned.
  *
- * The caller is responsible for sticky/overflow checks and CLOG on success.
+ * is_sticky: if true, ENGINE_ENOMEM is returned when do_item_sticky_overflowed()
+ * is true and new memory would be consumed (new insert, or replace with larger elem).
+ *
+ * max_count: maximum number of elements allowed in the tree (0 = no limit).
+ * ENGINE_EOVERFLOW is returned on a new insert when tot_elem_cnt >= max_count.
+ * Replace path is not subject to this check.
+ *
+ * The caller is responsible for CLOG on success.
  * ccnt must be incremented by the caller only when old_elem_out is NULL
  * (i.e., a new elem was inserted, not a replacement).
  *
@@ -80,10 +87,12 @@ typedef struct _htree_node {
  * means space shrank (replace with smaller elem).  On any error the value is
  * undefined.
  *
- * Returns ENGINE_SUCCESS, ENGINE_ENOMEM, or ENGINE_ELEM_EEXISTS. */
+ * Returns ENGINE_SUCCESS, ENGINE_ENOMEM, ENGINE_EOVERFLOW, or ENGINE_ELEM_EEXISTS. */
 ENGINE_ERROR_CODE htree_elem_insert(htree_node      **root_pptr,
                                     htree_elem_item  *elem,
                                     bool              replace_if_exist,
+                                    bool              is_sticky,
+                                    int               max_count,
                                     htree_elem_item **old_elem_out,
                                     ssize_t          *space_delta_out,
                                     const void       *cookie);

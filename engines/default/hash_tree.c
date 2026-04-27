@@ -70,6 +70,8 @@ static void do_htree_node_link(htree_node *par_node, const int par_hidx,
 ENGINE_ERROR_CODE htree_elem_insert(htree_node      **root_pptr,
                                     htree_elem_item  *elem,
                                     bool              replace_if_exist,
+                                    bool              is_sticky,
+                                    int               max_count,
                                     htree_elem_item **old_elem_out,
                                     ssize_t          *space_delta_out,
                                     const void       *cookie)
@@ -114,6 +116,17 @@ ENGINE_ERROR_CODE htree_elem_insert(htree_node      **root_pptr,
 
     if (find != NULL) {
         if (replace_if_exist) {
+#ifdef ENABLE_STICKY_ITEM
+            if (is_sticky && find->nbytes < elem->nbytes) {
+                if (do_item_sticky_overflowed()) {
+                    if (new_root) {
+                        do_htree_node_free(*root_pptr);
+                        *root_pptr = NULL;
+                    }
+                    return ENGINE_ENOMEM;
+                }
+            }
+#endif
             elem->next = find->next;
             if (prev != NULL)
                 prev->next = elem;
@@ -132,6 +145,24 @@ ENGINE_ERROR_CODE htree_elem_insert(htree_node      **root_pptr,
         } else {
             return ENGINE_ELEM_EEXISTS;
         }
+    }
+
+    /* new insert path: sticky and overflow checks */
+#ifdef ENABLE_STICKY_ITEM
+    if (is_sticky && do_item_sticky_overflowed()) {
+        if (new_root) {
+            do_htree_node_free(*root_pptr);
+            *root_pptr = NULL;
+        }
+        return ENGINE_ENOMEM;
+    }
+#endif
+    if (max_count > 0 && (int)(*root_pptr)->tot_elem_cnt >= max_count) {
+        if (new_root) {
+            do_htree_node_free(*root_pptr);
+            *root_pptr = NULL;
+        }
+        return ENGINE_EOVERFLOW;
     }
 
     bool node_created = new_root;
