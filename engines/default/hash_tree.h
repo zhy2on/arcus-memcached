@@ -58,6 +58,31 @@ typedef struct _htree_node {
     void    *htab[HTREE_HASHTAB_SIZE];
 } htree_node;
 
+/* Update the value of an existing elem whose key matches elem->data[:nkey].
+ *
+ * Precondition: elem->hval must be set by the caller via
+ * genhash_string_hash(elem->data, elem->nkey).
+ *
+ * Returns ENGINE_ELEM_ENOENT if no matching elem exists.
+ *
+ * If find->refcount == 0 && find->nbytes == elem->nbytes, performs an
+ * in-place update (memcpy only, no chain rewire); *old_elem_out is set to
+ * find with status ELEM_STATUS_LINKED (still in the chain, data overwritten).
+ * Otherwise the old elem is unlinked (status ELEM_STATUS_UNLINKED) and
+ * returned via *old_elem_out; the caller is responsible for freeing it.
+ * Caller distinguishes the two paths by checking old_elem->status.
+ *
+ * is_sticky: ENGINE_ENOMEM is returned when do_item_sticky_overflowed() is
+ * true and the new elem is larger than the old one.
+ *
+ * Returns ENGINE_SUCCESS, ENGINE_ENOMEM, or ENGINE_ELEM_ENOENT. */
+ENGINE_ERROR_CODE htree_elem_update(htree_node      **root_pptr,
+                                    htree_elem_item  *elem,
+                                    bool              is_sticky,
+                                    htree_elem_item **old_elem_out,
+                                    ssize_t          *space_delta_out,
+                                    const void       *cookie);
+
 /* Insert elem into the hash tree rooted at *root_pptr.
  *
  * Precondition: elem->nkey and elem->nbytes must be set by the caller.

@@ -190,6 +190,38 @@ static ENGINE_ERROR_CODE do_htree_elem_insert(htree_node **root_pptr,
     return ENGINE_SUCCESS;
 }
 
+ENGINE_ERROR_CODE htree_elem_update(htree_node      **root_pptr,
+                                    htree_elem_item  *elem,
+                                    bool              is_sticky,
+                                    htree_elem_item **old_elem_out,
+                                    ssize_t          *space_delta_out,
+                                    const void       *cookie)
+{
+    if (*root_pptr == NULL)
+        return ENGINE_ELEM_ENOENT;
+
+    htree_node      *node;
+    htree_elem_item *prev;
+    int hidx;
+
+    htree_elem_item *find = do_htree_find_leaf(*root_pptr, elem->hval,
+                                               elem->nkey, elem->data,
+                                               &node, &hidx, &prev);
+    if (find == NULL)
+        return ENGINE_ELEM_ENOENT;
+
+    if (find->refcount == 0 && find->nbytes == elem->nbytes) {
+        /* in-place update: same size, overwrite data[] without realloc */
+        memcpy(find->data, elem->data, elem->nbytes);
+        if (old_elem_out)    *old_elem_out   = find;
+        if (space_delta_out) *space_delta_out = 0;
+        return ENGINE_SUCCESS;
+    }
+
+    return do_htree_elem_replace(node, hidx, prev, find, elem,
+                                 is_sticky, old_elem_out, space_delta_out);
+}
+
 ENGINE_ERROR_CODE htree_elem_insert(htree_node      **root_pptr,
                                     htree_elem_item  *elem,
                                     bool              replace_if_exist,
