@@ -19,10 +19,15 @@
 #define HASH_TREE_H
 
 #include <stdint.h>
+#include <stdbool.h>
+#include <memcached/engine.h>
 
 #define HTREE_HASHTAB_SIZE       16
 #define HTREE_HASHIDX_MASK       0x0000000F
 #define HTREE_MAX_HASHCHAIN_SIZE 64
+
+#define HTREE_GET_HASHIDX(hval, hdepth) \
+    (((hval) & (HTREE_HASHIDX_MASK << ((hdepth)*4))) >> ((hdepth)*4))
 
 /* Base type for hash_tree to cast elem items.
  * Not used directly — each collection defines its own elem struct
@@ -45,5 +50,32 @@ typedef struct _htree_node {
     int16_t  hcnt[HTREE_HASHTAB_SIZE];
     void    *htab[HTREE_HASHTAB_SIZE];
 } htree_node;
+
+/* Callback to check if a tree elem matches the elem being inserted.
+ * Both pointers are cast from collection-specific elem types. */
+typedef bool (*htree_elem_match_func)(const htree_elem_item *find,
+                                      const htree_elem_item *elem);
+
+/* Insert elem into the hash tree rooted at *root_pptr.
+ *
+ * Precondition: elem->hval must be set by the caller.
+ *
+ * If replace_if_exist is true and a matching elem is found, the old elem is
+ * unlinked and returned via *old_elem_out (if non-NULL); the caller is
+ * responsible for CLOG, space accounting, and freeing the old elem.
+ *
+ * If replace_if_exist is false and a duplicate is found, ENGINE_ELEM_EEXISTS
+ * is returned.
+ *
+ * The caller is responsible for sticky/overflow checks before calling this
+ * function, as well as ccnt updates, space accounting, and CLOG on success.
+ *
+ * Returns ENGINE_SUCCESS, ENGINE_ENOMEM, or ENGINE_ELEM_EEXISTS. */
+ENGINE_ERROR_CODE htree_elem_insert(htree_node           **root_pptr,
+                                    htree_elem_item       *elem,
+                                    htree_elem_match_func  match_fn,
+                                    bool                   replace_if_exist,
+                                    htree_elem_item      **old_elem_out,
+                                    const void            *cookie);
 
 #endif
