@@ -18,10 +18,13 @@
  */
 #include "config.h"
 #include <assert.h>
+#include <stddef.h>
 #include <string.h>
 
 #include "default_engine.h"
 #include "hash_tree.h"
+
+extern int genhash_string_hash(const void *p, size_t nkey);
 
 static htree_node *do_htree_node_alloc(const uint8_t depth, const void *cookie)
 {
@@ -64,14 +67,16 @@ static void do_htree_node_link(htree_node *par_node, const int par_hidx,
     par_node->hcnt[par_hidx] = -1; /* child hash node */
 }
 
-ENGINE_ERROR_CODE htree_elem_insert(htree_node           **root_pptr,
-                                    htree_elem_item       *elem,
-                                    htree_elem_match_func  match_fn,
-                                    bool                   replace_if_exist,
-                                    htree_elem_item      **old_elem_out,
-                                    const void            *cookie)
+ENGINE_ERROR_CODE htree_elem_insert(htree_node      **root_pptr,
+                                    htree_elem_item  *elem,
+                                    bool              replace_if_exist,
+                                    htree_elem_item **old_elem_out,
+                                    ssize_t          *space_delta_out,
+                                    const void       *cookie)
 {
     bool new_root = false;
+
+    elem->hval = genhash_string_hash(elem->data, elem->nkey);
 
     if (*root_pptr == NULL) {
         htree_node *root = do_htree_node_alloc(0, cookie);
@@ -98,10 +103,14 @@ ENGINE_ERROR_CODE htree_elem_insert(htree_node           **root_pptr,
     for (find = (htree_elem_item *)node->htab[hidx];
          find != NULL;
          find = (htree_elem_item *)find->next) {
-        if (match_fn(find, elem))
+        if (find->hval == elem->hval &&
+            find->nkey == elem->nkey &&
+            memcmp(find->data, elem->data, elem->nkey) == 0)
             break;
         prev = find;
     }
+
+    size_t new_ntotal = offsetof(htree_elem_item, data) + elem->nbytes;
 
     if (find != NULL) {
         if (replace_if_exist) {
@@ -114,12 +123,18 @@ ENGINE_ERROR_CODE htree_elem_insert(htree_node           **root_pptr,
             find->status = ELEM_STATUS_UNLINKED;
             if (old_elem_out)
                 *old_elem_out = find;
+            if (space_delta_out) {
+                size_t old_ntotal = offsetof(htree_elem_item, data) + find->nbytes;
+                *space_delta_out = (ssize_t)slabs_space_size(new_ntotal)
+                                 - (ssize_t)slabs_space_size(old_ntotal);
+            }
             return ENGINE_SUCCESS;
         } else {
             return ENGINE_ELEM_EEXISTS;
         }
     }
 
+    bool node_created = new_root;
     if (node->hcnt[hidx] >= HTREE_MAX_HASHCHAIN_SIZE) {
         htree_node *n_node = do_htree_node_alloc(node->hdepth + 1, cookie);
         if (n_node == NULL) {
@@ -132,6 +147,7 @@ ENGINE_ERROR_CODE htree_elem_insert(htree_node           **root_pptr,
         do_htree_node_link(node, hidx, n_node);
         node = n_node;
         hidx = HTREE_GET_HASHIDX(elem->hval, node->hdepth);
+        node_created = true;
     }
 
     elem->next       = node->htab[hidx];
@@ -151,5 +167,10 @@ ENGINE_ERROR_CODE htree_elem_insert(htree_node           **root_pptr,
 
     if (old_elem_out)
         *old_elem_out = NULL;
+    if (space_delta_out) {
+        *space_delta_out = (ssize_t)slabs_space_size(new_ntotal);
+        if (node_created)
+            *space_delta_out += (ssize_t)slabs_space_size(sizeof(htree_node));
+    }
     return ENGINE_SUCCESS;
 }
