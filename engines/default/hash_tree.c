@@ -67,6 +67,129 @@ static void do_htree_node_link(htree_node *par_node, const int par_hidx,
     par_node->hcnt[par_hidx] = -1; /* child hash node */
 }
 
+/* Traverse from root to the leaf node that owns hval, and search for a
+ * matching elem (hval + nkey + data).  On return, *node_out and *hidx_out
+ * identify the leaf slot; *prev_out is the predecessor (NULL = chain head).
+ * Returns the matching elem, or NULL if not found. */
+static htree_elem_item *do_htree_find_leaf(htree_node *root,
+                                           uint32_t hval, uint16_t nkey,
+                                           const unsigned char *data,
+                                           htree_node **node_out, int *hidx_out,
+                                           htree_elem_item **prev_out)
+{
+    htree_node      *node = root;
+    htree_elem_item *prev = NULL;
+    htree_elem_item *find;
+    int hidx = -1;
+
+    while (node != NULL) {
+        hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
+        if (node->hcnt[hidx] >= 0)
+            break;
+        node = (htree_node *)node->htab[hidx];
+    }
+    assert(node != NULL && hidx != -1);
+
+    for (find = (htree_elem_item *)node->htab[hidx];
+         find != NULL;
+         find = (htree_elem_item *)find->next) {
+        if (find->hval == hval && find->nkey == nkey &&
+            memcmp(find->data, data, nkey) == 0)
+            break;
+        prev = find;
+    }
+
+    *node_out = node;
+    *hidx_out = hidx;
+    *prev_out = prev;
+    return find;
+}
+
+/* sticky check + replace find with elem. No overflow check (ccnt unchanged). */
+static ENGINE_ERROR_CODE do_htree_elem_replace(htree_node *node, const int hidx,
+                                               htree_elem_item *prev,
+                                               htree_elem_item *find,
+                                               htree_elem_item *elem,
+                                               bool is_sticky,
+                                               htree_elem_item **old_elem_out,
+                                               ssize_t *space_delta_out)
+{
+#ifdef ENABLE_STICKY_ITEM
+    if (is_sticky && find->nbytes < elem->nbytes) {
+        if (do_item_sticky_overflowed())
+            return ENGINE_ENOMEM;
+    }
+#endif
+    elem->next = find->next;
+    if (prev != NULL)
+        prev->next = elem;
+    else
+        node->htab[hidx] = elem;
+    elem->status  = ELEM_STATUS_LINKED;
+    find->status  = ELEM_STATUS_UNLINKED;
+
+    if (old_elem_out)
+        *old_elem_out = find;
+    if (space_delta_out) {
+        size_t new_ntotal = offsetof(htree_elem_item, data) + elem->nbytes;
+        size_t old_ntotal = offsetof(htree_elem_item, data) + find->nbytes;
+        *space_delta_out = (ssize_t)slabs_space_size(new_ntotal)
+                         - (ssize_t)slabs_space_size(old_ntotal);
+    }
+    return ENGINE_SUCCESS;
+}
+
+/* Link elem as a new entry at node->htab[hidx], splitting the chain into a
+ * child node if needed.  Caller must run sticky/overflow checks beforehand. */
+static ENGINE_ERROR_CODE do_htree_elem_insert(htree_node **root_pptr,
+                                              htree_node *node, int hidx,
+                                              htree_elem_item *elem,
+                                              bool new_root,
+                                              htree_elem_item **old_elem_out,
+                                              ssize_t *space_delta_out,
+                                              const void *cookie)
+{
+    bool node_created = new_root;
+    if (node->hcnt[hidx] >= HTREE_MAX_HASHCHAIN_SIZE) {
+        htree_node *n_node = do_htree_node_alloc(node->hdepth + 1, cookie);
+        if (n_node == NULL) {
+            if (new_root) {
+                do_htree_node_free(*root_pptr);
+                *root_pptr = NULL;
+            }
+            return ENGINE_ENOMEM;
+        }
+        do_htree_node_link(node, hidx, n_node);
+        node  = n_node;
+        hidx  = HTREE_GET_HASHIDX(elem->hval, node->hdepth);
+        node_created = true;
+    }
+
+    elem->next       = node->htab[hidx];
+    node->htab[hidx] = elem;
+    node->hcnt[hidx] += 1;
+    elem->status      = ELEM_STATUS_LINKED;
+
+    htree_node *cur = *root_pptr;
+    while (cur != node) {
+        cur->tot_elem_cnt += 1;
+        int cidx = HTREE_GET_HASHIDX(elem->hval, cur->hdepth);
+        assert(cur->hcnt[cidx] == -1);
+        cur = (htree_node *)cur->htab[cidx];
+    }
+    node->tot_elem_cnt += 1;
+
+    if (old_elem_out)
+        *old_elem_out = NULL;
+    if (space_delta_out) {
+        size_t new_ntotal = offsetof(htree_elem_item, data) + elem->nbytes;
+        *space_delta_out = (ssize_t)slabs_space_size(new_ntotal);
+        if (node_created)
+            *space_delta_out += (ssize_t)slabs_space_size(sizeof(htree_node));
+    }
+    return ENGINE_SUCCESS;
+}
+
 ENGINE_ERROR_CODE htree_elem_insert(htree_node      **root_pptr,
                                     htree_elem_item  *elem,
                                     bool              replace_if_exist,
@@ -88,135 +211,49 @@ ENGINE_ERROR_CODE htree_elem_insert(htree_node      **root_pptr,
         new_root = true;
     }
 
-    /* insert-only: sticky/overflow check before find so overflow takes priority */
+    htree_node      *node;
+    htree_elem_item *prev;
+    int hidx;
+
+    /* insert-only: check before find so overflow takes priority over EEXISTS */
     if (!replace_if_exist) {
 #ifdef ENABLE_STICKY_ITEM
         if (is_sticky && do_item_sticky_overflowed()) {
-            if (new_root) {
-                do_htree_node_free(*root_pptr);
-                *root_pptr = NULL;
-            }
+            if (new_root) { do_htree_node_free(*root_pptr); *root_pptr = NULL; }
             return ENGINE_ENOMEM;
         }
 #endif
         if (max_count > 0 && (int)(*root_pptr)->tot_elem_cnt >= max_count) {
-            if (new_root) {
-                do_htree_node_free(*root_pptr);
-                *root_pptr = NULL;
-            }
+            if (new_root) { do_htree_node_free(*root_pptr); *root_pptr = NULL; }
             return ENGINE_EOVERFLOW;
         }
     }
 
-    htree_node      *node = *root_pptr;
-    htree_elem_item *prev = NULL;
-    htree_elem_item *find;
-    int hidx = -1;
-
-    while (node != NULL) {
-        hidx = HTREE_GET_HASHIDX(elem->hval, node->hdepth);
-        if (node->hcnt[hidx] >= 0) /* elem chain */
-            break;
-        node = (htree_node *)node->htab[hidx];
-    }
-    assert(node != NULL && hidx != -1);
-
-    prev = NULL;
-    for (find = (htree_elem_item *)node->htab[hidx];
-         find != NULL;
-         find = (htree_elem_item *)find->next) {
-        if (find->hval == elem->hval &&
-            find->nkey == elem->nkey &&
-            memcmp(find->data, elem->data, elem->nkey) == 0)
-            break;
-        prev = find;
-    }
-
-    size_t new_ntotal = offsetof(htree_elem_item, data) + elem->nbytes;
+    htree_elem_item *find = do_htree_find_leaf(*root_pptr, elem->hval,
+                                               elem->nkey, elem->data,
+                                               &node, &hidx, &prev);
 
     if (find != NULL) {
-        if (replace_if_exist) {
-#ifdef ENABLE_STICKY_ITEM
-            if (is_sticky && find->nbytes < elem->nbytes) {
-                if (do_item_sticky_overflowed())
-                    return ENGINE_ENOMEM;
-            }
-#endif
-            elem->next = find->next;
-            if (prev != NULL)
-                prev->next = elem;
-            else
-                node->htab[hidx] = elem;
-            elem->status = ELEM_STATUS_LINKED;
-            find->status = ELEM_STATUS_UNLINKED;
-            if (old_elem_out)
-                *old_elem_out = find;
-            if (space_delta_out) {
-                size_t old_ntotal = offsetof(htree_elem_item, data) + find->nbytes;
-                *space_delta_out = (ssize_t)slabs_space_size(new_ntotal)
-                                 - (ssize_t)slabs_space_size(old_ntotal);
-            }
-            return ENGINE_SUCCESS;
-        } else {
+        if (!replace_if_exist)
             return ENGINE_ELEM_EEXISTS;
-        }
+        return do_htree_elem_replace(node, hidx, prev, find, elem,
+                                     is_sticky, old_elem_out, space_delta_out);
     }
 
-    /* upsert new insert path: sticky/overflow check after find */
+    /* upsert new insert path: check after find (no duplicate found) */
+    if (replace_if_exist) {
 #ifdef ENABLE_STICKY_ITEM
-    if (is_sticky && do_item_sticky_overflowed()) {
-        if (new_root) {
-            do_htree_node_free(*root_pptr);
-            *root_pptr = NULL;
-        }
-        return ENGINE_ENOMEM;
-    }
-#endif
-    if (max_count > 0 && (int)(*root_pptr)->tot_elem_cnt >= max_count) {
-        if (new_root) {
-            do_htree_node_free(*root_pptr);
-            *root_pptr = NULL;
-        }
-        return ENGINE_EOVERFLOW;
-    }
-
-    bool node_created = new_root;
-    if (node->hcnt[hidx] >= HTREE_MAX_HASHCHAIN_SIZE) {
-        htree_node *n_node = do_htree_node_alloc(node->hdepth + 1, cookie);
-        if (n_node == NULL) {
-            if (new_root) {
-                do_htree_node_free(*root_pptr);
-                *root_pptr = NULL;
-            }
+        if (is_sticky && do_item_sticky_overflowed()) {
+            if (new_root) { do_htree_node_free(*root_pptr); *root_pptr = NULL; }
             return ENGINE_ENOMEM;
         }
-        do_htree_node_link(node, hidx, n_node);
-        node = n_node;
-        hidx = HTREE_GET_HASHIDX(elem->hval, node->hdepth);
-        node_created = true;
+#endif
+        if (max_count > 0 && (int)(*root_pptr)->tot_elem_cnt >= max_count) {
+            if (new_root) { do_htree_node_free(*root_pptr); *root_pptr = NULL; }
+            return ENGINE_EOVERFLOW;
+        }
     }
 
-    elem->next       = node->htab[hidx];
-    node->htab[hidx] = elem;
-    node->hcnt[hidx] += 1;
-    elem->status      = ELEM_STATUS_LINKED;
-
-    /* update tot_elem_cnt from root down to node */
-    htree_node *cur = *root_pptr;
-    while (cur != node) {
-        cur->tot_elem_cnt += 1;
-        int cidx = HTREE_GET_HASHIDX(elem->hval, cur->hdepth);
-        assert(cur->hcnt[cidx] == -1);
-        cur = (htree_node *)cur->htab[cidx];
-    }
-    node->tot_elem_cnt += 1;
-
-    if (old_elem_out)
-        *old_elem_out = NULL;
-    if (space_delta_out) {
-        *space_delta_out = (ssize_t)slabs_space_size(new_ntotal);
-        if (node_created)
-            *space_delta_out += (ssize_t)slabs_space_size(sizeof(htree_node));
-    }
-    return ENGINE_SUCCESS;
+    return do_htree_elem_insert(root_pptr, node, hidx, elem, new_root,
+                                old_elem_out, space_delta_out, cookie);
 }
