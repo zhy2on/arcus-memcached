@@ -104,17 +104,14 @@ static bool hash_insert(hash_table *ht, int key)
  * SET collection manangement
  */
 
-#define SET_GET_HASHIDX(hval, hdepth) \
-        (((hval) & (SET_HASHIDX_MASK << ((hdepth)*4))) >> ((hdepth)*4))
-
 static inline uint32_t do_set_elem_ntotal(set_elem_item *elem)
 {
     return offsetof(set_elem_item, data) + elem->nbytes;
 }
 
-static inline bool is_leaf_node(set_hash_node *node)
+static inline bool is_leaf_node(htree_node *node)
 {
-    for (int hidx = 0; hidx < SET_HASHTAB_SIZE; hidx++) {
+    for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
         if (node->hcnt[hidx] == -1)
             return false;
     }
@@ -185,9 +182,9 @@ static hash_item *do_set_item_alloc(const void *key, const uint32_t nkey,
     return it;
 }
 
-static void do_set_node_free(set_hash_node *node)
+static void do_set_node_free(htree_node *node)
 {
-    do_item_mem_free(node, sizeof(set_hash_node));
+    do_item_mem_free(node, sizeof(htree_node));
 }
 
 static set_elem_item *do_set_elem_alloc(const uint32_t nbytes, const void *cookie)
@@ -226,9 +223,9 @@ static void do_set_elem_release(set_elem_item *elem)
 }
 
 static void do_set_node_unlink(set_meta_info *info,
-                               set_hash_node *par_node, const int par_hidx)
+                               htree_node *par_node, const int par_hidx)
 {
-    set_hash_node *node;
+    htree_node *node;
 
     if (par_node == NULL) {
         node = info->root;
@@ -240,9 +237,9 @@ static void do_set_node_unlink(set_meta_info *info,
         set_elem_item *elem;
         int hidx, fcnt = 0;
 
-        node = (set_hash_node *)par_node->htab[par_hidx];
+        node = (htree_node *)par_node->htab[par_hidx];
 
-        for (hidx = 0; hidx < SET_HASHTAB_SIZE; hidx++) {
+        for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
             assert(node->hcnt[hidx] >= 0);
             if (node->hcnt[hidx] > 0) {
                 fcnt += node->hcnt[hidx];
@@ -265,7 +262,7 @@ static void do_set_node_unlink(set_meta_info *info,
     }
 
     if (info->stotal > 0) { /* apply memory space */
-        size_t stotal = slabs_space_size(sizeof(set_hash_node));
+        size_t stotal = slabs_space_size(sizeof(htree_node));
         do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
     }
 
@@ -274,7 +271,7 @@ static void do_set_node_unlink(set_meta_info *info,
 }
 
 static void do_set_elem_unlink(set_meta_info *info,
-                               set_hash_node *node, const int hidx,
+                               htree_node *node, const int hidx,
                                set_elem_item *prev, set_elem_item *elem,
                                enum elem_delete_cause cause)
 {
@@ -302,12 +299,12 @@ static set_elem_item *do_set_elem_find(set_meta_info *info, const char *val, con
     set_elem_item *elem = NULL;
 
     if (info->root != NULL) {
-        set_hash_node *node = info->root;
+        htree_node *node = info->root;
         int hval = genhash_string_hash(val, vlen);
         int hidx = 0;
 
         while (node != NULL) {
-            hidx = SET_GET_HASHIDX(hval, node->hdepth);
+            hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
             if (node->hcnt[hidx] >= 0) /* set element hash chain */
                 break;
             node = node->htab[hidx];
@@ -323,18 +320,18 @@ static set_elem_item *do_set_elem_find(set_meta_info *info, const char *val, con
     return elem;
 }
 
-static ENGINE_ERROR_CODE do_set_elem_traverse_delete(set_meta_info *info, set_hash_node *node,
+static ENGINE_ERROR_CODE do_set_elem_traverse_delete(set_meta_info *info, htree_node *node,
                                                      const int hval, const char *val, const int vlen)
 {
     ENGINE_ERROR_CODE ret;
 
-    int hidx = SET_GET_HASHIDX(hval, node->hdepth);
+    int hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
 
     if (node->hcnt[hidx] == -1) {
-        set_hash_node *child_node = node->htab[hidx];
+        htree_node *child_node = node->htab[hidx];
         ret = do_set_elem_traverse_delete(info, child_node, hval, val, vlen);
         if (ret == ENGINE_SUCCESS) {
-            if (child_node->tot_elem_cnt < (SET_MAX_HASHCHAIN_SIZE/2)
+            if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2)
                 && is_leaf_node(child_node)) {
                 do_set_node_unlink(info, node, hidx);
             }
@@ -381,22 +378,22 @@ static ENGINE_ERROR_CODE do_set_elem_delete_with_value(set_meta_info *info,
     return ret;
 }
 
-static int do_set_elem_traverse_dfs(set_meta_info *info, set_hash_node *node,
+static int do_set_elem_traverse_dfs(set_meta_info *info, htree_node *node,
                                     const uint32_t count, const bool delete,
                                     set_elem_item **elem_array)
 {
     int hidx;
     int fcnt = 0; /* found count */
 
-    for (hidx = 0; hidx < SET_HASHTAB_SIZE; hidx++) {
+    for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
         if (node->hcnt[hidx] == -1) {
-            set_hash_node *child_node = (set_hash_node *)node->htab[hidx];
+            htree_node *child_node = (htree_node *)node->htab[hidx];
             int rcnt = (count > 0 ? (count - fcnt) : 0);
             int ecnt = do_set_elem_traverse_dfs(info, child_node, rcnt, delete,
                                                 (elem_array==NULL ? NULL : &elem_array[fcnt]));
             fcnt += ecnt;
             if (delete) {
-                if (child_node->tot_elem_cnt < (SET_MAX_HASHCHAIN_SIZE/2)
+                if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2)
                     && is_leaf_node(child_node)) {
                     do_set_node_unlink(info, node, hidx);
                 }
@@ -422,16 +419,16 @@ static int do_set_elem_traverse_dfs(set_meta_info *info, set_hash_node *node,
     return fcnt;
 }
 
-static int do_set_elem_traverse_sampling(set_meta_info *info, set_hash_node *node,
+static int do_set_elem_traverse_sampling(set_meta_info *info, htree_node *node,
                                          uint32_t remain, const uint32_t count,
                                          set_elem_item **elem_array)
 {
     int hidx;
     int fcnt = 0; /* found count */
 
-    for (hidx = 0; hidx < SET_HASHTAB_SIZE; hidx++) {
+    for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
         if (node->hcnt[hidx] == -1) {
-            set_hash_node *child_node = (set_hash_node *)node->htab[hidx];
+            htree_node *child_node = (htree_node *)node->htab[hidx];
             fcnt += do_set_elem_traverse_sampling(info, child_node, remain,
                                                   count - fcnt, &elem_array[fcnt]);
             remain -= child_node->tot_elem_cnt;
@@ -453,20 +450,20 @@ static int do_set_elem_traverse_sampling(set_meta_info *info, set_hash_node *nod
     return fcnt;
 }
 
-static set_elem_item *do_set_elem_at_offset(set_meta_info *info, set_hash_node *node,
+static set_elem_item *do_set_elem_at_offset(set_meta_info *info, htree_node *node,
                                             uint32_t offset, const bool delete)
 {
     int hidx;
-    for (hidx = 0; hidx < SET_HASHTAB_SIZE; hidx++) {
+    for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
         if (node->hcnt[hidx] == -1) {
-            set_hash_node *child_node = (set_hash_node *)node->htab[hidx];
+            htree_node *child_node = (htree_node *)node->htab[hidx];
             if (offset >= child_node->tot_elem_cnt) {
                 offset -= child_node->tot_elem_cnt;
                 continue;
             }
             set_elem_item *found = do_set_elem_at_offset(info, child_node, offset, delete);
             if (delete) {
-                if (child_node->tot_elem_cnt < (SET_MAX_HASHCHAIN_SIZE/2)
+                if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2)
                     && is_leaf_node(child_node)) {
                     do_set_node_unlink(info, node, hidx);
                 }
@@ -825,7 +822,7 @@ uint32_t set_elem_delete_with_count(set_meta_info *info, const uint32_t count)
 void set_elem_get_all(set_meta_info *info, elems_result_t *eresult)
 {
     assert(eresult->elem_arrsz >= info->ccnt && eresult->elem_count == 0);
-    set_hash_node *node;
+    htree_node *node;
     set_elem_item *elem;
     int cur_depth, i;
     bool push;
@@ -835,7 +832,7 @@ void set_elem_get_all(set_meta_info *info, elems_result_t *eresult)
      */
     static int stack_max = 0;
     static struct _set_hash_posi {
-        set_hash_node *node;
+        htree_node *node;
         int idx;
     } *stack = NULL;
 
@@ -857,7 +854,7 @@ void set_elem_get_all(set_meta_info *info, elems_result_t *eresult)
         }
 
         /* Scan the current node */
-        for (i = stack[cur_depth].idx; i < SET_HASHTAB_SIZE; i++) {
+        for (i = stack[cur_depth].idx; i < HTREE_HASHTAB_SIZE; i++) {
             if (node->hcnt[i] >= 0) {
                 /* Hash chain.  Insert all elements on the chain into the
                  * to-be-copied list.
@@ -878,7 +875,7 @@ void set_elem_get_all(set_meta_info *info, elems_result_t *eresult)
         }
 
         /* Scannned everything in this node. Go up. */
-        if (i >= SET_HASHTAB_SIZE) {
+        if (i >= HTREE_HASHTAB_SIZE) {
             cur_depth--;
             if (cur_depth < 0)
                 node = NULL; /* done */
