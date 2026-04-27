@@ -19,6 +19,7 @@
 #include "config.h"
 #include <fcntl.h>
 #include <errno.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -65,15 +66,9 @@ typedef struct _map_prev_info {
 #define MAP_GET_HASHIDX(hval, hdepth) \
         (((hval) & (MAP_HASHIDX_MASK << ((hdepth)*4))) >> ((hdepth)*4))
 
-static inline int map_hash_eq(const int h1, const void *v1, size_t vlen1,
-                              const int h2, const void *v2, size_t vlen2)
-{
-    return (h1 == h2 && vlen1 == vlen2 && memcmp(v1, v2, vlen1) == 0);
-}
-
 static inline uint32_t do_map_elem_ntotal(map_elem_item *elem)
 {
-    return sizeof(map_elem_item) + elem->nfield + elem->nbytes;
+    return offsetof(map_elem_item, data) + elem->nbytes;
 }
 
 static ENGINE_ERROR_CODE do_map_item_find(const void *key, const uint32_t nkey,
@@ -167,17 +162,17 @@ static void do_map_node_free(map_hash_node *node)
 static map_elem_item *do_map_elem_alloc(const int nfield,
                                         const uint32_t nbytes, const void *cookie)
 {
-    size_t ntotal = sizeof(map_elem_item) + nfield + nbytes;
+    size_t ntotal = offsetof(map_elem_item, data) + nfield + nbytes;
 
     map_elem_item *elem = do_item_mem_alloc(ntotal, LRU_CLSID_FOR_SMALL, cookie);
     if (elem != NULL) {
         elem->slabs_clsid = slabs_clsid(ntotal);
         assert(elem->slabs_clsid > 0);
 
-        elem->refcount    = 0;
-        elem->nfield      = (uint8_t)nfield;
-        elem->nbytes      = (uint16_t)nbytes;
-        elem->status = ELEM_STATUS_UNLINKED; /* unlinked state */
+        elem->refcount = 0;
+        elem->nkey     = (uint16_t)nfield;
+        elem->nbytes   = (uint16_t)(nfield + nbytes); /* total: field + value */
+        elem->status   = ELEM_STATUS_UNLINKED;
     }
     return elem;
 }
@@ -344,7 +339,7 @@ static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *el
     int hidx = -1;
 
     /* map hash value */
-    elem->hval = genhash_string_hash(elem->data, elem->nfield);
+    elem->hval = genhash_string_hash(elem->data, elem->nkey);
 
     while (node != NULL) {
         hidx = MAP_GET_HASHIDX(elem->hval, node->hdepth);
@@ -354,8 +349,8 @@ static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *el
     }
     assert(node != NULL);
     for (find = node->htab[hidx]; find != NULL; find = find->next) {
-        if (map_hash_eq(elem->hval, elem->data, elem->nfield,
-                        find->hval, find->data, find->nfield))
+        if (elem->hval == find->hval && elem->nkey == find->nkey &&
+            memcmp(elem->data, find->data, elem->nkey) == 0)
             break;
         prev = find;
     }
@@ -472,7 +467,8 @@ static bool do_map_elem_traverse_dfs_byfield(map_meta_info *info, map_hash_node 
             map_elem_item *prev = NULL;
             map_elem_item *elem = node->htab[hidx];
             while (elem != NULL) {
-                if (map_hash_eq(hval, field->value, field->length, elem->hval, elem->data, elem->nfield)) {
+                if (hval == elem->hval && (int)elem->nkey == field->length &&
+                    memcmp(field->value, elem->data, field->length) == 0) {
                     if (elem_array) {
                         elem->refcount++;
                         elem_array[0] = elem;
@@ -570,7 +566,8 @@ static map_elem_item *do_map_elem_find(map_hash_node *node, const field_t *field
     }
     assert(node != NULL);
     for (elem = node->htab[hidx]; elem != NULL; elem = elem->next) {
-        if (map_hash_eq(hval, field->value, field->length, elem->hval, elem->data, elem->nfield)) {
+        if (hval == elem->hval && (int)elem->nkey == field->length &&
+            memcmp(field->value, elem->data, field->length) == 0) {
             if (pinfo != NULL) {
                 pinfo->node = node;
                 pinfo->prev = prev;
@@ -599,31 +596,31 @@ static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
         return ENGINE_ELEM_ENOENT;
     }
 
-    if (elem->refcount == 0 && elem->nbytes == nbytes) {
+    if (elem->refcount == 0 && (elem->nbytes - elem->nkey) == nbytes) {
         /* old body size == new body size */
         /* do in-place update */
-        memcpy(elem->data + elem->nfield, value, nbytes);
+        memcpy(elem->data + elem->nkey, value, nbytes);
         CLOG_MAP_ELEM_INSERT(info, elem, elem);
     } else {
         /* old body size != new body size */
 #ifdef ENABLE_STICKY_ITEM
         /* sticky memory limit check */
         if (IS_STICKY_COLLFLG(info)) {
-            if (elem->nbytes < nbytes) {
+            if ((elem->nbytes - elem->nkey) < nbytes) {
                 if (do_item_sticky_overflowed())
                     return ENGINE_ENOMEM;
             }
         }
 #endif
 
-        map_elem_item *new_elem = do_map_elem_alloc(elem->nfield, nbytes, cookie);
+        map_elem_item *new_elem = do_map_elem_alloc(elem->nkey, nbytes, cookie);
         if (new_elem == NULL) {
             return ENGINE_ENOMEM;
         }
 
         /* build the new element */
-        memcpy(new_elem->data, elem->data, elem->nfield);
-        memcpy(new_elem->data + elem->nfield, value, nbytes);
+        memcpy(new_elem->data, elem->data, elem->nkey);
+        memcpy(new_elem->data + elem->nkey, value, nbytes);
         new_elem->hval = elem->hval;
 
         /* replace the element */

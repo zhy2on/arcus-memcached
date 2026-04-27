@@ -19,6 +19,7 @@
 #include "config.h"
 #include <fcntl.h>
 #include <errno.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -33,6 +34,7 @@
 
 #include "default_engine.h"
 #include "item_clog.h"
+#include "hash_tree.h"
 
 static struct default_engine *engine=NULL;
 static struct engine_config  *config=NULL; // engine config
@@ -105,15 +107,9 @@ static bool hash_insert(hash_table *ht, int key)
 #define SET_GET_HASHIDX(hval, hdepth) \
         (((hval) & (SET_HASHIDX_MASK << ((hdepth)*4))) >> ((hdepth)*4))
 
-static inline int set_hash_eq(const int h1, const void *v1, size_t vlen1,
-                              const int h2, const void *v2, size_t vlen2)
-{
-    return (h1 == h2 && vlen1 == vlen2 && memcmp(v1, v2, vlen1) == 0);
-}
-
 static inline uint32_t do_set_elem_ntotal(set_elem_item *elem)
 {
-    return sizeof(set_elem_item) + elem->nbytes;
+    return offsetof(set_elem_item, data) + elem->nbytes;
 }
 
 static inline bool is_leaf_node(set_hash_node *node)
@@ -189,24 +185,6 @@ static hash_item *do_set_item_alloc(const void *key, const uint32_t nkey,
     return it;
 }
 
-static set_hash_node *do_set_node_alloc(uint8_t hash_depth, const void *cookie)
-{
-    size_t ntotal = sizeof(set_hash_node);
-
-    set_hash_node *node = do_item_mem_alloc(ntotal, LRU_CLSID_FOR_SMALL, cookie);
-    if (node != NULL) {
-        node->slabs_clsid = slabs_clsid(ntotal);
-        assert(node->slabs_clsid > 0);
-
-        node->refcount    = 0;
-        node->hdepth      = hash_depth;
-        node->tot_elem_cnt = 0;
-        memset(node->hcnt, 0, SET_HASHTAB_SIZE*sizeof(uint16_t));
-        memset(node->htab, 0, SET_HASHTAB_SIZE*sizeof(void*));
-    }
-    return node;
-}
-
 static void do_set_node_free(set_hash_node *node)
 {
     do_item_mem_free(node, sizeof(set_hash_node));
@@ -214,16 +192,17 @@ static void do_set_node_free(set_hash_node *node)
 
 static set_elem_item *do_set_elem_alloc(const uint32_t nbytes, const void *cookie)
 {
-    size_t ntotal = sizeof(set_elem_item) + nbytes;
+    size_t ntotal = offsetof(set_elem_item, data) + nbytes;
 
     set_elem_item *elem = do_item_mem_alloc(ntotal, LRU_CLSID_FOR_SMALL, cookie);
     if (elem != NULL) {
         elem->slabs_clsid = slabs_clsid(ntotal);
         assert(elem->slabs_clsid > 0);
 
-        elem->refcount    = 0;
-        elem->nbytes      = nbytes;
-        elem->status = ELEM_STATUS_UNLINKED; /* unlinked state */
+        elem->refcount = 0;
+        elem->nkey     = (uint16_t)nbytes; /* whole value is the key for set */
+        elem->nbytes   = (uint16_t)nbytes;
+        elem->status   = ELEM_STATUS_UNLINKED;
     }
     return elem;
 }
@@ -243,35 +222,6 @@ static void do_set_elem_release(set_elem_item *elem)
     }
     if (elem->refcount == 0 && elem->status == ELEM_STATUS_UNLINKED) {
         do_set_elem_free(elem);
-    }
-}
-
-static void do_set_node_link(set_meta_info *info,
-                             set_hash_node *par_node, const int par_hidx,
-                             set_hash_node *node)
-{
-    if (par_node == NULL) {
-        info->root = node;
-    } else {
-        set_elem_item *elem;
-        while (par_node->htab[par_hidx] != NULL) {
-            elem = par_node->htab[par_hidx];
-            par_node->htab[par_hidx] = elem->next;
-
-            int hidx = SET_GET_HASHIDX(elem->hval, node->hdepth);
-            elem->next = node->htab[hidx];
-            node->htab[hidx] = elem;
-            node->hcnt[hidx] += 1;
-            node->tot_elem_cnt += 1;
-        }
-        assert(node->tot_elem_cnt == par_node->hcnt[par_hidx]);
-        par_node->htab[par_hidx] = node;
-        par_node->hcnt[par_hidx] = -1; /* child hash node */
-    }
-
-    if (1) { /* apply memory space */
-        size_t stotal = slabs_space_size(sizeof(set_hash_node));
-        do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
     }
 }
 
@@ -323,69 +273,6 @@ static void do_set_node_unlink(set_meta_info *info,
     do_set_node_free(node);
 }
 
-static ENGINE_ERROR_CODE do_set_elem_link(set_meta_info *info, set_elem_item *elem,
-                                          const void *cookie)
-{
-    assert(info->root != NULL);
-    set_hash_node *node = info->root;
-    set_elem_item *find;
-    int hidx = -1;
-
-    /* set hash value */
-    elem->hval = genhash_string_hash(elem->value, elem->nbytes);
-
-    while (node != NULL) {
-        hidx = SET_GET_HASHIDX(elem->hval, node->hdepth);
-        if (node->hcnt[hidx] >= 0) /* set element hash chain */
-            break;
-        node = node->htab[hidx];
-    }
-    assert(node != NULL);
-    assert(hidx != -1);
-
-    for (find = node->htab[hidx]; find != NULL; find = find->next) {
-        if (set_hash_eq(elem->hval, elem->value, elem->nbytes,
-                        find->hval, find->value, find->nbytes))
-            break;
-    }
-    if (find != NULL) {
-        return ENGINE_ELEM_EEXISTS;
-    }
-
-    if (node->hcnt[hidx] >= SET_MAX_HASHCHAIN_SIZE) {
-        set_hash_node *n_node = do_set_node_alloc(node->hdepth+1, cookie);
-        if (n_node == NULL) {
-            return ENGINE_ENOMEM;
-        }
-        do_set_node_link(info, node, hidx, n_node);
-
-        node = n_node;
-        hidx = SET_GET_HASHIDX(elem->hval, node->hdepth);
-    }
-
-    elem->next = node->htab[hidx];
-    node->htab[hidx] = elem;
-    node->hcnt[hidx] += 1;
-    node->tot_elem_cnt += 1;
-    elem->status = ELEM_STATUS_LINKED;
-
-    set_hash_node *par_node = info->root;
-    while (par_node != node) {
-        par_node->tot_elem_cnt += 1;
-        hidx = SET_GET_HASHIDX(elem->hval, par_node->hdepth);
-        assert(par_node->hcnt[hidx] == -1);
-        par_node = par_node->htab[hidx];
-    }
-    info->ccnt++;
-
-    if (1) { /* apply memory space */
-        size_t stotal = slabs_space_size(do_set_elem_ntotal(elem));
-        do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
-    }
-
-    return ENGINE_SUCCESS;
-}
-
 static void do_set_elem_unlink(set_meta_info *info,
                                set_hash_node *node, const int hidx,
                                set_elem_item *prev, set_elem_item *elem,
@@ -428,7 +315,8 @@ static set_elem_item *do_set_elem_find(set_meta_info *info, const char *val, con
         assert(node != NULL);
 
         for (elem = node->htab[hidx]; elem != NULL; elem = elem->next) {
-            if (set_hash_eq(hval, val, vlen, elem->hval, elem->value, elem->nbytes))
+            if (hval == elem->hval && vlen == elem->nkey &&
+                memcmp(val, elem->data, vlen) == 0)
                 break;
         }
     }
@@ -458,7 +346,8 @@ static ENGINE_ERROR_CODE do_set_elem_traverse_delete(set_meta_info *info, set_ha
             set_elem_item *prev = NULL;
             set_elem_item *elem = node->htab[hidx];
             while (elem != NULL) {
-                if (set_hash_eq(hval, val, vlen, elem->hval, elem->value, elem->nbytes))
+                if (hval == elem->hval && vlen == elem->nkey &&
+                    memcmp(val, elem->data, vlen) == 0)
                     break;
                 prev = elem;
                 elem = elem->next;
@@ -707,26 +596,16 @@ static ENGINE_ERROR_CODE do_set_elem_insert(hash_item *it, set_elem_item *elem,
         return ENGINE_EOVERFLOW;
     }
 
-    /* create the root hash node if it does not exist */
-    bool new_root_flag = false;
-    if (info->root == NULL) { /* empty set */
-        set_hash_node *r_node = do_set_node_alloc(0, cookie);
-        if (r_node == NULL) {
-            return ENGINE_ENOMEM;
-        }
-        do_set_node_link(info, NULL, 0, r_node);
-        new_root_flag = true;
-    }
-
-    /* insert the element */
-    ret = do_set_elem_link(info, elem, cookie);
-    if (ret != ENGINE_SUCCESS) {
-        if (new_root_flag) {
-            do_set_node_unlink(info, NULL, 0);
-        }
+    ssize_t space_delta = 0;
+    ret = htree_elem_insert((htree_node **)&info->root,
+                            (htree_elem_item *)elem,
+                            false, NULL, &space_delta, cookie);
+    if (ret != ENGINE_SUCCESS)
         return ret;
-    }
 
+    info->ccnt++;
+    /* set never replaces, so space_delta is always positive */
+    do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_SET, (size_t)space_delta);
     CLOG_SET_ELEM_INSERT(info, elem);
     return ENGINE_SUCCESS;
 }
@@ -953,7 +832,7 @@ uint32_t set_elem_delete_with_count(set_meta_info *info, const uint32_t count)
     return do_set_elem_delete(info, count, ELEM_DELETE_COLL);
 }
 
-/* See do_set_elem_traverse_dfs and do_set_elem_link. do_set_elem_traverse_dfs
+/* See do_set_elem_traverse_dfs. do_set_elem_traverse_dfs
  * can visit all elements, but only supports get and delete operations.
  * Do something similar and visit all elements.
  */
@@ -1150,7 +1029,7 @@ ENGINE_ERROR_CODE set_apply_elem_insert(void *engine, hash_item *it,
                         " element alloc failed. nbytes=%d\n", nbytes);
             ret = ENGINE_ENOMEM; break;
         }
-        memcpy(elem->value, value, nbytes);
+        memcpy(elem->data, value, nbytes);
 
         ret = do_set_elem_insert(it, elem, NULL);
         if (ret != ENGINE_SUCCESS) {
