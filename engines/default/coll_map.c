@@ -121,14 +121,6 @@ static hash_item *do_map_item_alloc(const void *key, const uint32_t nkey,
     return it;
 }
 
-static void do_map_node_unlink(map_meta_info *info,
-                               htree_node *par_node, const int par_hidx)
-{
-    ssize_t space_delta = 0;
-    htree_node_unlink((htree_node **)&info->root, par_node, par_hidx, &space_delta);
-    if (info->stotal > 0)
-        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);
-}
 
 static void do_map_elem_unlink_clog(void *meta, htree_elem_item *elem)
 {
@@ -175,9 +167,6 @@ static uint32_t do_map_elem_delete_with_field(map_meta_info *info, const int num
                 if (do_map_elem_find_or_delete_byfield(info, &flist[ii], true, NULL)) {
                     delcnt++;
                 }
-            }
-            if (info->root != NULL && info->root->tot_elem_cnt == 0) {
-                do_map_node_unlink(info, NULL, 0);
             }
         }
         CLOG_ELEM_DELETE_END((coll_meta_info*)info, cause);
@@ -252,9 +241,6 @@ static uint32_t do_map_elem_get(map_meta_info *info,
             if (do_map_elem_find_or_delete_byfield(info, &flist[ii], delete, &elem_array[fcnt])) {
                 fcnt++;
             }
-        }
-        if (delete && info->root != NULL && info->root->tot_elem_cnt == 0) {
-            do_map_node_unlink(info, NULL, 0);
         }
     }
     if (delete) {

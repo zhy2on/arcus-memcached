@@ -540,9 +540,15 @@ bool htree_elem_traverse_dfs_bykey(htree_node            **root_pptr,
                                     ssize_t                *space_delta_out)
 {
     uint32_t hval = genhash_string_hash(data, nkey);
-    return do_htree_elem_traverse_bykey(root_pptr, node, hval, nkey, data,
-                                        delete, elem_out, unlink_fn, meta,
-                                        space_delta_out);
+    bool found = do_htree_elem_traverse_bykey(root_pptr, node, hval, nkey, data,
+                                              delete, elem_out, unlink_fn, meta,
+                                              space_delta_out);
+    if (found && delete && *root_pptr != NULL && (*root_pptr)->tot_elem_cnt == 0) {
+        ssize_t node_delta = 0;
+        htree_node_unlink(root_pptr, NULL, 0, &node_delta);
+        if (space_delta_out) *space_delta_out += node_delta;
+    }
+    return found;
 }
 
 int htree_elem_traverse_dfs_bycnt(htree_node            **root_pptr,
