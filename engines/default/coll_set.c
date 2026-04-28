@@ -126,15 +126,6 @@ static hash_item *do_set_item_alloc(const void *key, const uint32_t nkey,
     return it;
 }
 
-static void do_set_elem_release(set_elem_item *elem)
-{
-    if (elem->refcount != 0) {
-        elem->refcount--;
-    }
-    if (elem->refcount == 0 && elem->status == ELEM_STATUS_UNLINKED) {
-        htree_elem_free(elem);
-    }
-}
 
 static void do_set_node_unlink(set_meta_info *info,
                                htree_node *par_node, const int par_hidx)
@@ -299,7 +290,7 @@ void set_elem_release(set_elem_item **elem_array, const int elem_count)
     int cnt = 0;
     LOCK_CACHE();
     while (cnt < elem_count) {
-        do_set_elem_release(elem_array[cnt++]);
+        htree_elem_release((htree_elem_item *)elem_array[cnt++]);
         if ((cnt % 100) == 0 && cnt < elem_count) {
             UNLOCK_CACHE();
             LOCK_CACHE();

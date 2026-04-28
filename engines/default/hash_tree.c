@@ -127,6 +127,16 @@ void htree_elem_free(htree_elem_item *elem)
     do_item_mem_free(elem, offsetof(htree_elem_item, data) + elem->nbytes);
 }
 
+void htree_elem_release(htree_elem_item *elem)
+{
+    if (elem->refcount != 0) {
+        elem->refcount--;
+    }
+    if (elem->refcount == 0 && elem->status == ELEM_STATUS_UNLINKED) {
+        htree_elem_free(elem);
+    }
+}
+
 /* Redistribute elems from par_node->htab[par_hidx] into new child node,
  * then install child into par_node's slot. */
 static void do_htree_node_link(htree_node *par_node, const int par_hidx,
