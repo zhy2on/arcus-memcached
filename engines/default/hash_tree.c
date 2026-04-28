@@ -426,6 +426,11 @@ int htree_elem_traverse_rand(htree_node            **root_pptr,
             elem_array[fcnt++] = found;
             total_count--;
         }
+        if (*root_pptr != NULL && (*root_pptr)->tot_elem_cnt == 0) {
+            ssize_t node_delta = 0;
+            htree_node_unlink(root_pptr, NULL, 0, &node_delta);
+            if (space_delta_out) *space_delta_out += node_delta;
+        }
     } else if (count <= total_count / 10) {
         /* sparse: use offset dedup hash table */
         int capacity = (int)(1.3 * (double)count);

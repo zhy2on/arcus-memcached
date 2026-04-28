@@ -195,7 +195,7 @@ int htree_elem_traverse_sampling(htree_node      *node,
  * random.  total_count is info->ccnt (total elems in tree).
  * If delete is true, each selected elem is unlinked; unlink_fn handles CLOG;
  * space_delta_out accumulates freed slab space (caller does ccnt and
- * do_coll_space_decr after).
+ * do_coll_space_decr after); root node is collapsed if tot_elem_cnt == 0.
  * elem_array receives refcount-bumped pointers to selected elems.
  * Returns the number of elems selected. */
 int htree_elem_traverse_rand(htree_node            **root_pptr,
