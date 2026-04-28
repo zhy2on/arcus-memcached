@@ -163,6 +163,47 @@ ENGINE_ERROR_CODE htree_elem_insert(htree_node      **root_pptr,
                                     ssize_t          *space_delta_out,
                                     const void       *cookie);
 
+/* Return the elem at the given offset (0-based) in DFS order.
+ * If delete is true, the elem is unlinked and freed (if refcount == 0);
+ * unlink_fn (if non-NULL) is called for per-elem CLOG;
+ * space_delta_out accumulates freed slab space;
+ * ancestor tot_elem_cnt is decremented and child nodes are collapsed.
+ * The returned elem always has refcount bumped by 1.
+ * Returns NULL only if offset >= tot_elem_cnt (should not happen in practice). */
+htree_elem_item *htree_elem_at_offset(htree_node            **root_pptr,
+                                       htree_node             *node,
+                                       uint32_t                offset,
+                                       bool                    delete,
+                                       htree_elem_unlink_func  unlink_fn,
+                                       void                   *meta,
+                                       ssize_t                *space_delta_out);
+
+/* Reservoir-sampling traversal: probabilistically select up to count elems
+ * from the tree (read-only, no delete).  remain is the total number of elems
+ * in node's subtree (used for probability calculation).
+ * Fills elem_array[] with refcount-bumped pointers and returns the count. */
+int htree_elem_traverse_sampling(htree_node      *node,
+                                  uint32_t         remain,
+                                  uint32_t         count,
+                                  htree_elem_item **elem_array);
+
+/* Random-selection traversal: select count elems from the tree uniformly at
+ * random.  total_count is info->ccnt (total elems in tree).
+ * If delete is true, each selected elem is unlinked; unlink_fn handles CLOG;
+ * space_delta_out accumulates freed slab space (caller does ccnt and
+ * do_coll_space_decr after).
+ * elem_array receives refcount-bumped pointers to selected elems.
+ * Returns the number of elems selected. */
+int htree_elem_traverse_rand(htree_node            **root_pptr,
+                              htree_node             *node,
+                              uint32_t                total_count,
+                              uint32_t                count,
+                              bool                    delete,
+                              htree_elem_item       **elem_array,
+                              htree_elem_unlink_func  unlink_fn,
+                              void                   *meta,
+                              ssize_t                *space_delta_out);
+
 /* DFS traversal to find and optionally delete the single elem matching
  * (hval, nkey, data[:nkey]).
  *
