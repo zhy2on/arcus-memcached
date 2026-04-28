@@ -146,33 +146,6 @@ static bool do_map_elem_find_or_delete_byfield(map_meta_info *info, const field_
     return found;
 }
 
-static uint32_t do_map_elem_delete_with_field(map_meta_info *info, const int numfields,
-                                              const field_t *flist, enum elem_delete_cause cause)
-{
-    assert(cause == ELEM_DELETE_NORMAL);
-    uint32_t delcnt = 0;
-
-    if (info->root != NULL) {
-        CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, numfields, cause);
-        if (numfields == 0) {
-            ssize_t space_delta = 0;
-            delcnt = htree_elem_traverse_dfs_bycnt((htree_node **)&info->root, info->root,
-                                                   0, true, NULL,
-                                                   do_map_elem_unlink_clog, info, &space_delta);
-            info->ccnt -= delcnt;
-            if (space_delta != 0)
-                do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);
-        } else {
-            for (int ii = 0; ii < numfields; ii++) {
-                if (do_map_elem_find_or_delete_byfield(info, &flist[ii], true, NULL)) {
-                    delcnt++;
-                }
-            }
-        }
-        CLOG_ELEM_DELETE_END((coll_meta_info*)info, cause);
-    }
-    return delcnt;
-}
 
 static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
                                             const field_t *field, const char *value,
@@ -238,7 +211,8 @@ static uint32_t do_map_elem_get(map_meta_info *info,
         }
     } else {
         for (int ii = 0; ii < numfields; ii++) {
-            if (do_map_elem_find_or_delete_byfield(info, &flist[ii], delete, &elem_array[fcnt])) {
+            map_elem_item **elem_out = (elem_array != NULL) ? &elem_array[fcnt] : NULL;
+            if (do_map_elem_find_or_delete_byfield(info, &flist[ii], delete, elem_out)) {
                 fcnt++;
             }
         }
@@ -428,7 +402,8 @@ ENGINE_ERROR_CODE map_elem_delete(const char *key, const uint32_t nkey,
     ret = do_map_item_find(key, nkey, DONT_UPDATE, &it);
     if (ret == ENGINE_SUCCESS) { /* it != NULL */
         map_meta_info *info = (map_meta_info *)item_get_meta(it);
-        *del_count = do_map_elem_delete_with_field(info, numfields, flist, ELEM_DELETE_NORMAL);
+        if (info->root != NULL)
+            *del_count = do_map_elem_get(info, numfields, flist, true, NULL);
         if (*del_count > 0) {
             if (info->ccnt == 0 && drop_if_empty) {
                 assert(info->root == NULL);
@@ -683,7 +658,7 @@ ENGINE_ERROR_CODE map_apply_elem_delete(void *engine, hash_item *it,
     const char *key = item_get_key(it);
     map_meta_info *info;
     field_t flist;
-    uint32_t ndeleted;
+    uint32_t ndeleted = 0;
     ENGINE_ERROR_CODE ret = ENGINE_SUCCESS;
 
     flist.value = (char*)field;
@@ -708,7 +683,8 @@ ENGINE_ERROR_CODE map_apply_elem_delete(void *engine, hash_item *it,
             ret = ENGINE_ELEM_ENOENT; break;
         }
 
-        ndeleted = do_map_elem_delete_with_field(info, 1, &flist, ELEM_DELETE_NORMAL);
+        if (do_map_elem_find_or_delete_byfield(info, &flist, true, NULL))
+            ndeleted = 1;
         if (ndeleted == 0) {
             logger->log(EXTENSION_LOG_INFO, NULL, "map_apply_elem_delete failed."
                         " no element deleted. key=%.*s nkey=%u field=%.*s nfield=%u\n",
