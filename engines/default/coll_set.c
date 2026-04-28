@@ -103,12 +103,10 @@ static bool hash_insert(hash_table *ht, int key)
 /*
  * SET collection manangement
  */
-
 static inline uint32_t do_set_elem_ntotal(set_elem_item *elem)
 {
     return offsetof(set_elem_item, data) + elem->nbytes;
 }
-
 
 static ENGINE_ERROR_CODE do_set_item_find(const void *key, const uint32_t nkey,
                                           bool do_update, hash_item **item)
@@ -239,62 +237,26 @@ static set_elem_item *do_set_elem_find(set_meta_info *info, const char *val, con
     return elem;
 }
 
-static ENGINE_ERROR_CODE do_set_elem_traverse_delete(set_meta_info *info, htree_node *node,
-                                                     const int hval, const char *val, const int vlen)
-{
-    ENGINE_ERROR_CODE ret;
-
-    int hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
-
-    if (node->hcnt[hidx] == -1) {
-        htree_node *child_node = node->htab[hidx];
-        ret = do_set_elem_traverse_delete(info, child_node, hval, val, vlen);
-        if (ret == ENGINE_SUCCESS) {
-            if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2)
-                && is_leaf_node(child_node)) {
-                do_set_node_unlink(info, node, hidx);
-            }
-            node->tot_elem_cnt -= 1;
-        }
-    } else {
-        ret = ENGINE_ELEM_ENOENT;
-        if (node->hcnt[hidx] > 0) {
-            set_elem_item *prev = NULL;
-            set_elem_item *elem = node->htab[hidx];
-            while (elem != NULL) {
-                if (hval == elem->hval && vlen == elem->nkey &&
-                    memcmp(val, elem->data, vlen) == 0)
-                    break;
-                prev = elem;
-                elem = elem->next;
-            }
-            if (elem != NULL) {
-                do_set_elem_unlink(info, node, hidx, prev, elem, ELEM_DELETE_NORMAL);
-                ret = ENGINE_SUCCESS;
-            }
-        }
-    }
-    return ret;
-}
-
 static ENGINE_ERROR_CODE do_set_elem_delete_with_value(set_meta_info *info,
                                                        const char *val, const int vlen,
                                                        enum elem_delete_cause cause)
 {
     assert(cause == ELEM_DELETE_NORMAL);
-    ENGINE_ERROR_CODE ret;
-    if (info->root != NULL) {
-        int hval = genhash_string_hash(val, vlen);
-        ret = do_set_elem_traverse_delete(info, info->root, hval, val, vlen);
-        if (ret == ENGINE_SUCCESS) {
-            if (info->root->tot_elem_cnt == 0) {
-                do_set_node_unlink(info, NULL, 0);
-            }
-        }
-    } else {
-        ret = ENGINE_ELEM_ENOENT;
-    }
-    return ret;
+    if (info->root == NULL)
+        return ENGINE_ELEM_ENOENT;
+
+    ssize_t space_delta = 0;
+    bool found = htree_elem_traverse_dfs_bykey((htree_node **)&info->root, info->root,
+                                               vlen, (const unsigned char *)val,
+                                               true, NULL,
+                                               do_set_elem_unlink_clog, info, &space_delta);
+    if (!found)
+        return ENGINE_ELEM_ENOENT;
+
+    info->ccnt--;
+    if (space_delta != 0)
+        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_SET, (size_t)-space_delta);
+    return ENGINE_SUCCESS;
 }
 
 static int do_set_elem_traverse_dfs(set_meta_info *info, htree_node *node,
@@ -386,17 +348,6 @@ static set_elem_item *do_set_elem_at_offset(set_meta_info *info, htree_node *nod
         }
     }
     return NULL;
-}
-
-static uint32_t do_set_elem_delete(set_meta_info *info, const uint32_t count,
-                                   enum elem_delete_cause cause)
-{
-    assert(cause == ELEM_DELETE_COLL);
-    uint32_t fcnt = 0;
-    if (info->root != NULL) {
-        fcnt = do_set_elem_traverse_dfs(info, info->root, count, true, NULL);
-    }
-    return fcnt;
 }
 
 static uint32_t do_set_elem_traverse_rand(set_meta_info *info,
@@ -706,7 +657,12 @@ ENGINE_ERROR_CODE set_elem_get(const char *key, const uint32_t nkey,
 
 uint32_t set_elem_delete_with_count(set_meta_info *info, const uint32_t count)
 {
-    return do_set_elem_delete(info, count, ELEM_DELETE_COLL);
+    uint32_t fcnt = 0;
+    if (info->root != NULL) {
+        fcnt = htree_elem_traverse_dfs_bycnt((htree_node **)&info->root, info->root,
+                                             count, true, NULL, NULL, NULL, NULL);
+    }
+    return fcnt;
 }
 
 /* See do_set_elem_traverse_dfs. do_set_elem_traverse_dfs

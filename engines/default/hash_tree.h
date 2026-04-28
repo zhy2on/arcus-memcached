@@ -163,6 +163,28 @@ ENGINE_ERROR_CODE htree_elem_insert(htree_node      **root_pptr,
                                     ssize_t          *space_delta_out,
                                     const void       *cookie);
 
+/* DFS traversal to find and optionally delete the single elem matching
+ * (hval, nkey, data[:nkey]).
+ *
+ * If delete is false, the matching elem's refcount is bumped and returned via
+ * *elem_out (if non-NULL).
+ * If delete is true, the elem is unlinked and freed (if refcount == 0).
+ *   - unlink_fn (if non-NULL) is called after unlink for per-elem CLOG.
+ *   - space_delta_out accumulates the freed slab space.
+ * Ancestor tot_elem_cnt is decremented and child nodes are collapsed on the
+ * way back up, mirroring htree_elem_traverse_dfs_bycnt.
+ *
+ * Returns true if a matching elem was found, false otherwise. */
+bool htree_elem_traverse_dfs_bykey(htree_node            **root_pptr,
+                                    htree_node             *node,
+                                    uint16_t                nkey,
+                                    const unsigned char    *data,
+                                    bool                    delete,
+                                    htree_elem_item       **elem_out,
+                                    htree_elem_unlink_func  unlink_fn,
+                                    void                   *meta,
+                                    ssize_t                *space_delta_out);
+
 /* DFS traversal of the hash tree, collecting up to count elems (0 = all).
  * If delete is false, fills elem_array[] with refcount-bumped elem pointers
  * and returns the count found.
