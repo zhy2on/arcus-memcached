@@ -313,7 +313,6 @@ ENGINE_ERROR_CODE set_elem_delete(const char *key, const uint32_t nkey,
     PERSISTENCE_ACTION_BEGIN(cookie, (drop_if_empty ? UPD_SET_ELEM_DELETE_DROP
                                                     : UPD_SET_ELEM_DELETE));
 
-
     *dropped = false;
 
     LOCK_CACHE();

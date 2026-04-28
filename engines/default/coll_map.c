@@ -121,31 +121,31 @@ static hash_item *do_map_item_alloc(const void *key, const uint32_t nkey,
     return it;
 }
 
-
 static void do_map_elem_unlink_clog(void *meta, htree_elem_item *elem)
 {
     CLOG_MAP_ELEM_DELETE((map_meta_info *)meta, elem, ELEM_DELETE_NORMAL);
 }
 
-static bool do_map_elem_find_or_delete_byfield(map_meta_info *info, const field_t *field,
-                                               const bool delete, map_elem_item **elem_out)
+static ENGINE_ERROR_CODE do_map_elem_delete_with_field(map_meta_info *info,
+                                                       const field_t *field)
 {
+    if (info->root == NULL)
+        return ENGINE_ELEM_ENOENT;
+
     ssize_t space_delta = 0;
     bool found = htree_elem_traverse_dfs_bykey((htree_node **)&info->root, info->root,
                                                field->length,
                                                (const unsigned char *)field->value,
-                                               delete, (htree_elem_item **)elem_out,
-                                               delete ? do_map_elem_unlink_clog : NULL,
-                                               info,
-                                               delete ? &space_delta : NULL);
-    if (found && delete) {
-        info->ccnt--;
-        if (space_delta != 0)
-            do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);
-    }
-    return found;
-}
+                                               true, NULL,
+                                               do_map_elem_unlink_clog, info, &space_delta);
+    if (!found)
+        return ENGINE_ELEM_ENOENT;
 
+    info->ccnt--;
+    if (space_delta != 0)
+        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);
+    return ENGINE_SUCCESS;
+}
 
 static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
                                             const field_t *field, const char *value,
@@ -194,30 +194,34 @@ static uint32_t do_map_elem_get(map_meta_info *info,
 {
     assert(info->root);
     uint32_t fcnt = 0;
+    ssize_t space_delta = 0;
 
     if (delete) {
         CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, numfields, ELEM_DELETE_NORMAL);
     }
     if (numfields == 0) {
-        ssize_t space_delta = 0;
+        htree_elem_unlink_func fn = delete ? do_map_elem_unlink_clog : NULL;
         fcnt = htree_elem_traverse_dfs_bycnt((htree_node **)&info->root, info->root,
                                              0, delete, (htree_elem_item **)elem_array,
-                                             delete ? do_map_elem_unlink_clog : NULL, info,
-                                             delete ? &space_delta : NULL);
-        if (delete) {
-            info->ccnt -= fcnt;
-            if (space_delta != 0)
-                do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);
-        }
+                                             fn, info,
+                                             fn ? &space_delta : NULL);
     } else {
         for (int ii = 0; ii < numfields; ii++) {
             map_elem_item **elem_out = (elem_array != NULL) ? &elem_array[fcnt] : NULL;
-            if (do_map_elem_find_or_delete_byfield(info, &flist[ii], delete, elem_out)) {
-                fcnt++;
-            }
+            bool found = htree_elem_traverse_dfs_bykey((htree_node **)&info->root, info->root,
+                                                       flist[ii].length,
+                                                       (const unsigned char *)flist[ii].value,
+                                                       delete, (htree_elem_item **)elem_out,
+                                                       delete ? do_map_elem_unlink_clog : NULL,
+                                                       info,
+                                                       delete ? &space_delta : NULL);
+            if (found) fcnt++;
         }
     }
     if (delete) {
+        info->ccnt -= fcnt;
+        if (space_delta != 0)
+            do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);
         CLOG_ELEM_DELETE_END((coll_meta_info*)info, ELEM_DELETE_NORMAL);
     }
     return fcnt;
@@ -683,7 +687,7 @@ ENGINE_ERROR_CODE map_apply_elem_delete(void *engine, hash_item *it,
             ret = ENGINE_ELEM_ENOENT; break;
         }
 
-        if (do_map_elem_find_or_delete_byfield(info, &flist, true, NULL))
+        if (do_map_elem_delete_with_field(info, &flist) == ENGINE_SUCCESS)
             ndeleted = 1;
         if (ndeleted == 0) {
             logger->log(EXTENSION_LOG_INFO, NULL, "map_apply_elem_delete failed."
