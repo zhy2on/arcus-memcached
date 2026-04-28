@@ -40,9 +40,6 @@ static struct default_engine *engine=NULL;
 static struct engine_config  *config=NULL; // engine config
 static EXTENSION_LOGGER_DESCRIPTOR *logger;
 
-/* used by set and map collection */
-extern int genhash_string_hash(const void* p, size_t nkey);
-
 /* Cache Lock */
 static inline void LOCK_CACHE(void)
 {
