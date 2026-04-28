@@ -164,9 +164,7 @@ static void do_map_elem_unlink(map_meta_info *info,
 
 static void do_map_elem_unlink_clog(void *meta, htree_elem_item *elem)
 {
-    map_meta_info *info = (map_meta_info *)meta;
-    info->ccnt--;
-    CLOG_MAP_ELEM_DELETE(info, elem, ELEM_DELETE_NORMAL);
+    CLOG_MAP_ELEM_DELETE((map_meta_info *)meta, elem, ELEM_DELETE_NORMAL);
 }
 
 static bool do_map_elem_traverse_dfs_byfield(map_meta_info *info, htree_node *node, const int hval,
@@ -225,6 +223,7 @@ static uint32_t do_map_elem_delete_with_field(map_meta_info *info, const int num
             delcnt = htree_elem_traverse_dfs_bycnt((htree_node **)&info->root, info->root,
                                                    0, true, NULL,
                                                    do_map_elem_unlink_clog, info, &space_delta);
+            info->ccnt -= delcnt;
             if (space_delta != 0)
                 do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);
         } else {
@@ -312,8 +311,11 @@ static uint32_t do_map_elem_get(map_meta_info *info,
                                              0, delete, (htree_elem_item **)elem_array,
                                              delete ? do_map_elem_unlink_clog : NULL, info,
                                              delete ? &space_delta : NULL);
-        if (delete && space_delta != 0)
-            do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);
+        if (delete) {
+            info->ccnt -= fcnt;
+            if (space_delta != 0)
+                do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);
+        }
     } else {
         for (int ii = 0; ii < numfields; ii++) {
             int hval = genhash_string_hash(flist[ii].value, flist[ii].length);

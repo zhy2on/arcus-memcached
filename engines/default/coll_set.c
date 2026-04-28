@@ -210,9 +210,7 @@ static void do_set_elem_unlink(set_meta_info *info,
 
 static void do_set_elem_unlink_clog(void *meta, htree_elem_item *elem)
 {
-    set_meta_info *info = (set_meta_info *)meta;
-    info->ccnt--;
-    CLOG_SET_ELEM_DELETE(info, elem, ELEM_DELETE_NORMAL);
+    CLOG_SET_ELEM_DELETE((set_meta_info *)meta, elem, ELEM_DELETE_NORMAL);
 }
 
 static set_elem_item *do_set_elem_find(set_meta_info *info, const char *val, const int vlen)
@@ -310,8 +308,11 @@ static int do_set_elem_traverse_dfs(set_meta_info *info, htree_node *node,
                                              (htree_elem_item **)elem_array,
                                              fn, info,
                                              (fn != NULL) ? &space_delta : NULL);
-    if (fn != NULL && space_delta != 0)
-        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_SET, (size_t)-space_delta);
+    if (fn != NULL) {
+        info->ccnt -= fcnt;
+        if (space_delta != 0)
+            do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_SET, (size_t)-space_delta);
+    }
     return fcnt;
 }
 
