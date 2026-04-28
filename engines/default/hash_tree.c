@@ -141,6 +141,15 @@ uint32_t htree_elem_ntotal(htree_elem_item *elem)
     return offsetof(htree_elem_item, data) + elem->nbytes;
 }
 
+static inline bool is_leaf_node(const htree_node *node)
+{
+    for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
+        if (node->hcnt[hidx] == -1)
+            return false;
+    }
+    return true;
+}
+
 /* Redistribute elems from par_node->htab[par_hidx] into new child node,
  * then install child into par_node's slot. */
 static void do_htree_node_link(htree_node *par_node, const int par_hidx,

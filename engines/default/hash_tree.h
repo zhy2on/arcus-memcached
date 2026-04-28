@@ -30,12 +30,6 @@
 #define HTREE_GET_HASHIDX(hval, hdepth) \
     (((hval) & (HTREE_HASHIDX_MASK << ((hdepth)*4))) >> ((hdepth)*4))
 
-/* Base type for hash_tree to cast elem items.
- * Each collection defines its own elem struct whose leading fields match
- * this layout exactly.  data[] holds <key, value> where the first nkey
- * bytes are the lookup key (used for hval computation and match).
- * For set: nkey == nbytes (the whole value is the key).
- * For map: nkey == field length, nbytes == field + value length. */
 typedef struct _htree_elem_item {
     uint16_t refcount;
     uint8_t  slabs_clsid;
@@ -47,8 +41,6 @@ typedef struct _htree_elem_item {
     unsigned char data[];   /* offsetof = 20 */
 } htree_elem_item;
 
-/* Fixed internal node type — managed entirely by hash_tree.
- * Collections reference this via htree_node *root in their meta_info. */
 typedef struct _htree_node {
     uint16_t refcount;
     uint8_t  slabs_clsid;
@@ -58,45 +50,16 @@ typedef struct _htree_node {
     void    *htab[HTREE_HASHTAB_SIZE];
 } htree_node;
 
-static inline bool is_leaf_node(const htree_node *node)
-{
-    for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
-        if (node->hcnt[hidx] == -1)
-            return false;
-    }
-    return true;
-}
-
-/* Callback invoked by htree_elem_traverse_dfs_bycnt after each elem is unlinked
- * from the chain (ELEM_DELETE_NORMAL path, per-elem CLOG needed).
- * The traversal has already called htree_elem_unlink and htree_elem_free before
- * invoking this callback.  The callback is responsible only for CLOG and ccnt
- * decrement; space accounting is handled via space_delta_out on the traversal.
- * When NULL is passed, the traversal performs a plain unlink+free with no callback
- * (collection-delete path where no per-elem CLOG is needed). */
 typedef void (*htree_elem_unlink_func)(void *meta, htree_elem_item *elem);
 
-/* Unlink elem from node->htab[hidx] chain (prev is the predecessor, NULL if head).
- * Sets elem->status to ELEM_STATUS_UNLINKED; decrements node->hcnt[hidx] and
- * node->tot_elem_cnt.  Does NOT free elem or update ancestor tot_elem_cnt —
- * the caller's traversal handles ancestor updates on the way back up.
- * *space_delta_out is set to the (negative) slab space of the elem. */
 void htree_elem_unlink(htree_node *node, int hidx,
                        htree_elem_item *prev, htree_elem_item *elem,
                        ssize_t *space_delta_out);
 
-/* Collapse the child node at par_node->htab[par_hidx] back into par_node's
- * direct slot (node split reversal).  If par_node is NULL, the root node
- * (*root_pptr) is freed and *root_pptr is set to NULL (must have
- * tot_elem_cnt == 0).  On success *space_delta_out is set to the (negative)
- * slab space freed for the node. */
 void htree_node_unlink(htree_node **root_pptr,
                        htree_node *par_node, int par_hidx,
                        ssize_t *space_delta_out);
 
-/* Allocate a new htree elem with space for nbytes bytes in data[].
- * Sets slabs_clsid, refcount, status, nkey, nbytes; caller must fill data[].
- * hval is computed automatically by htree_elem_insert / htree_elem_update. */
 htree_elem_item *htree_elem_alloc(uint16_t nkey, uint16_t nbytes, const void *cookie);
 
 void htree_elem_free(htree_elem_item *elem);
@@ -105,59 +68,12 @@ void htree_elem_release(htree_elem_item *elem);
 
 uint32_t htree_elem_ntotal(htree_elem_item *elem);
 
-/* Update the value of an existing elem whose key matches elem->data[:nkey].
- *
- * Precondition: elem must be allocated via htree_elem_alloc (hval already set).
- *
- * Returns ENGINE_ELEM_ENOENT if no matching elem exists.
- *
- * If find->refcount == 0 && find->nbytes == elem->nbytes, performs an
- * in-place update (memcpy only, no chain rewire); *old_elem_out is set to
- * find with status ELEM_STATUS_LINKED (still in the chain, data overwritten).
- * Otherwise the old elem is unlinked (status ELEM_STATUS_UNLINKED) and
- * returned via *old_elem_out; the caller is responsible for freeing it.
- * Caller distinguishes the two paths by checking old_elem->status.
- *
- * is_sticky: ENGINE_ENOMEM is returned when do_item_sticky_overflowed() is
- * true and the new elem is larger than the old one.
- *
- * Returns ENGINE_SUCCESS, ENGINE_ENOMEM, or ENGINE_ELEM_ENOENT. */
 ENGINE_ERROR_CODE htree_elem_update(htree_node      **root_pptr,
                                     htree_elem_item  *elem,
                                     bool              is_sticky,
                                     htree_elem_item **old_elem_out,
                                     ssize_t          *space_delta_out);
 
-/* Insert elem into the hash tree rooted at *root_pptr.
- *
- * Precondition: elem->nkey and elem->nbytes must be set by the caller.
- * hval is computed internally from data[:nkey].
- *
- * If replace_if_exist is true and a matching elem is found, the old elem is
- * unlinked and returned via *old_elem_out (if non-NULL); the caller is
- * responsible for CLOG, ccnt update, and freeing the old elem.
- *
- * If replace_if_exist is false and a duplicate is found, ENGINE_ELEM_EEXISTS
- * is returned.
- *
- * is_sticky: if true, ENGINE_ENOMEM is returned when do_item_sticky_overflowed()
- * is true and new memory would be consumed (new insert, or replace with larger elem).
- *
- * max_count: maximum number of elements allowed in the tree (0 = no limit).
- * ENGINE_EOVERFLOW is returned on a new insert when tot_elem_cnt >= max_count.
- * Replace path is not subject to this check.
- *
- * The caller is responsible for CLOG on success.
- * ccnt must be incremented by the caller only when old_elem_out is NULL
- * (i.e., a new elem was inserted, not a replacement).
- *
- * On ENGINE_SUCCESS, *space_delta_out (if non-NULL) is set to the net slab
- * space change: slabs_space_size(new_elem) - slabs_space_size(old_elem if any)
- * + slabs_space_size(new_node if any).  Positive means space grew, negative
- * means space shrank (replace with smaller elem).  On any error the value is
- * undefined.
- *
- * Returns ENGINE_SUCCESS, ENGINE_ENOMEM, ENGINE_EOVERFLOW, or ENGINE_ELEM_EEXISTS. */
 ENGINE_ERROR_CODE htree_elem_insert(htree_node      **root_pptr,
                                     htree_elem_item  *elem,
                                     bool              replace_if_exist,
@@ -167,13 +83,6 @@ ENGINE_ERROR_CODE htree_elem_insert(htree_node      **root_pptr,
                                     ssize_t          *space_delta_out,
                                     const void       *cookie);
 
-/* Return the elem at the given offset (0-based) in DFS order.
- * If delete is true, the elem is unlinked and freed (if refcount == 0);
- * unlink_fn (if non-NULL) is called for per-elem CLOG;
- * space_delta_out accumulates freed slab space;
- * ancestor tot_elem_cnt is decremented and child nodes are collapsed.
- * The returned elem always has refcount bumped by 1.
- * Returns NULL only if offset >= tot_elem_cnt (should not happen in practice). */
 htree_elem_item *htree_elem_at_offset(htree_node            **root_pptr,
                                        htree_node             *node,
                                        uint32_t                offset,
@@ -182,22 +91,11 @@ htree_elem_item *htree_elem_at_offset(htree_node            **root_pptr,
                                        void                   *meta,
                                        ssize_t                *space_delta_out);
 
-/* Reservoir-sampling traversal: probabilistically select up to count elems
- * from the tree (read-only, no delete).  remain is the total number of elems
- * in node's subtree (used for probability calculation).
- * Fills elem_array[] with refcount-bumped pointers and returns the count. */
 int htree_elem_traverse_sampling(htree_node      *node,
                                   uint32_t         remain,
                                   uint32_t         count,
                                   htree_elem_item **elem_array);
 
-/* Random-selection traversal: select count elems from the tree uniformly at
- * random.  total_count is info->ccnt (total elems in tree).
- * If delete is true, each selected elem is unlinked; unlink_fn handles CLOG;
- * space_delta_out accumulates freed slab space (caller does ccnt and
- * do_coll_space_decr after); root node is collapsed if tot_elem_cnt == 0.
- * elem_array receives refcount-bumped pointers to selected elems.
- * Returns the number of elems selected. */
 int htree_elem_traverse_rand(htree_node            **root_pptr,
                               htree_node             *node,
                               uint32_t                total_count,
@@ -208,18 +106,6 @@ int htree_elem_traverse_rand(htree_node            **root_pptr,
                               void                   *meta,
                               ssize_t                *space_delta_out);
 
-/* DFS traversal to find and optionally delete the single elem matching
- * (hval, nkey, data[:nkey]).
- *
- * If delete is false, the matching elem's refcount is bumped and returned via
- * *elem_out (if non-NULL).
- * If delete is true, the elem is unlinked and freed (if refcount == 0).
- *   - unlink_fn (if non-NULL) is called after unlink for per-elem CLOG.
- *   - space_delta_out accumulates the freed slab space.
- * Ancestor tot_elem_cnt is decremented and child nodes are collapsed on the
- * way back up, mirroring htree_elem_traverse_dfs_bycnt.
- *
- * Returns true if a matching elem was found, false otherwise. */
 bool htree_elem_traverse_dfs_bykey(htree_node            **root_pptr,
                                     htree_node             *node,
                                     uint16_t                nkey,
@@ -230,18 +116,6 @@ bool htree_elem_traverse_dfs_bykey(htree_node            **root_pptr,
                                     void                   *meta,
                                     ssize_t                *space_delta_out);
 
-/* DFS traversal of the hash tree, collecting up to count elems (0 = all).
- * If delete is false, fills elem_array[] with refcount-bumped elem pointers
- * and returns the count found.
- * If delete is true, each elem is unlinked and freed internally.
- *   - If unlink_fn is non-NULL (ELEM_DELETE_NORMAL), it is called after each
- *     unlink+free for per-elem CLOG and ccnt decrement.
- *   - If unlink_fn is NULL (ELEM_DELETE_COLL), plain unlink+free with no callback.
- * space_delta_out accumulates the total (negative) slab space freed for elems;
- * node collapse space is not included (caller handles that separately).
- * elem_array may be NULL on the delete path.
- * Ancestor tot_elem_cnt is decremented on the way back up after each child
- * subtree is processed. */
 int htree_elem_traverse_dfs_bycnt(htree_node            **root_pptr,
                                    htree_node             *node,
                                    uint32_t                count,
