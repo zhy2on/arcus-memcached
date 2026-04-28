@@ -58,14 +58,6 @@ static inline void UNLOCK_CACHE(void)
  * MAP collection manangement
  */
 
-static inline bool is_leaf_node(htree_node *node)
-{
-    for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
-        if (node->hcnt[hidx] == -1)
-            return false;
-    }
-    return true;
-}
 
 static inline uint32_t do_map_elem_ntotal(map_elem_item *elem)
 {
@@ -170,6 +162,13 @@ static void do_map_elem_unlink(map_meta_info *info,
         htree_elem_free(elem);
 }
 
+static void do_map_elem_unlink_clog(void *meta, htree_elem_item *elem)
+{
+    map_meta_info *info = (map_meta_info *)meta;
+    info->ccnt--;
+    CLOG_MAP_ELEM_DELETE(info, elem, ELEM_DELETE_NORMAL);
+}
+
 static bool do_map_elem_traverse_dfs_byfield(map_meta_info *info, htree_node *node, const int hval,
                                              const field_t *field, const bool delete,
                                              map_elem_item **elem_array)
@@ -213,43 +212,6 @@ static bool do_map_elem_traverse_dfs_byfield(map_meta_info *info, htree_node *no
     return ret;
 }
 
-static int do_map_elem_traverse_dfs_bycnt(map_meta_info *info, htree_node *node,
-                                          const uint32_t count, const bool delete,
-                                          map_elem_item **elem_array, enum elem_delete_cause cause)
-{
-    int hidx;
-    int fcnt = 0; /* found count */
-
-    for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
-        if (node->hcnt[hidx] == -1) {
-            htree_node *child_node = (htree_node *)node->htab[hidx];
-            int rcnt = (count > 0 ? (count - fcnt) : 0);
-            fcnt += do_map_elem_traverse_dfs_bycnt(info, child_node, rcnt, delete,
-                                                  (elem_array==NULL ? NULL : &elem_array[fcnt]), cause);
-            if (delete) {
-                if (is_leaf_node(child_node) &&
-                    child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2)) {
-                    do_map_node_unlink(info, node, hidx);
-                }
-            }
-        } else if (node->hcnt[hidx] > 0) {
-            map_elem_item *elem = node->htab[hidx];
-            while (elem != NULL) {
-                if (elem_array) {
-                    elem->refcount++;
-                    elem_array[fcnt] = elem;
-                }
-                fcnt++;
-                if (delete) do_map_elem_unlink(info, node, hidx, NULL, elem, cause);
-                if (count > 0 && fcnt >= count) break;
-                elem = (delete ? node->htab[hidx] : elem->next);
-            }
-        }
-        if (count > 0 && fcnt >= count) break;
-    }
-    return fcnt;
-}
-
 static uint32_t do_map_elem_delete_with_field(map_meta_info *info, const int numfields,
                                               const field_t *flist, enum elem_delete_cause cause)
 {
@@ -259,7 +221,12 @@ static uint32_t do_map_elem_delete_with_field(map_meta_info *info, const int num
     if (info->root != NULL) {
         CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, numfields, cause);
         if (numfields == 0) {
-            delcnt = do_map_elem_traverse_dfs_bycnt(info, info->root, 0, true, NULL, cause);
+            ssize_t space_delta = 0;
+            delcnt = htree_elem_traverse_dfs_bycnt((htree_node **)&info->root, info->root,
+                                                   0, true, NULL,
+                                                   do_map_elem_unlink_clog, info, &space_delta);
+            if (space_delta != 0)
+                do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);
         } else {
             for (int ii = 0; ii < numfields; ii++) {
                 int hval = genhash_string_hash(flist[ii].value, flist[ii].length);
@@ -267,9 +234,9 @@ static uint32_t do_map_elem_delete_with_field(map_meta_info *info, const int num
                     delcnt++;
                 }
             }
-        }
-        if (is_leaf_node(info->root) && info->root->tot_elem_cnt == 0) {
-            do_map_node_unlink(info, NULL, 0);
+            if (info->root != NULL && info->root->tot_elem_cnt == 0) {
+                do_map_node_unlink(info, NULL, 0);
+            }
         }
         CLOG_ELEM_DELETE_END((coll_meta_info*)info, cause);
     }
@@ -323,10 +290,8 @@ static uint32_t do_map_elem_delete(map_meta_info *info, const uint32_t count,
     assert(cause == ELEM_DELETE_COLL);
     uint32_t fcnt = 0;
     if (info->root != NULL) {
-        fcnt = do_map_elem_traverse_dfs_bycnt(info, info->root, count, true, NULL, cause);
-        if (is_leaf_node(info->root) && info->root->tot_elem_cnt == 0) {
-            do_map_node_unlink(info, NULL, 0);
-        }
+        fcnt = htree_elem_traverse_dfs_bycnt((htree_node **)&info->root, info->root,
+                                             count, true, NULL, NULL, NULL, NULL);
     }
     return fcnt;
 }
@@ -342,8 +307,13 @@ static uint32_t do_map_elem_get(map_meta_info *info,
         CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, numfields, ELEM_DELETE_NORMAL);
     }
     if (numfields == 0) {
-        fcnt = do_map_elem_traverse_dfs_bycnt(info, info->root, 0, delete,
-                                              elem_array, ELEM_DELETE_NORMAL);
+        ssize_t space_delta = 0;
+        fcnt = htree_elem_traverse_dfs_bycnt((htree_node **)&info->root, info->root,
+                                             0, delete, (htree_elem_item **)elem_array,
+                                             delete ? do_map_elem_unlink_clog : NULL, info,
+                                             delete ? &space_delta : NULL);
+        if (delete && space_delta != 0)
+            do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);
     } else {
         for (int ii = 0; ii < numfields; ii++) {
             int hval = genhash_string_hash(flist[ii].value, flist[ii].length);
@@ -352,9 +322,9 @@ static uint32_t do_map_elem_get(map_meta_info *info,
                 fcnt++;
             }
         }
-    }
-    if (delete && is_leaf_node(info->root) && info->root->tot_elem_cnt == 0) {
-        do_map_node_unlink(info, NULL, 0);
+        if (delete && info->root != NULL && info->root->tot_elem_cnt == 0) {
+            do_map_node_unlink(info, NULL, 0);
+        }
     }
     if (delete) {
         CLOG_ELEM_DELETE_END((coll_meta_info*)info, ELEM_DELETE_NORMAL);

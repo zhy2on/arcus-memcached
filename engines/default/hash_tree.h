@@ -58,6 +58,24 @@ typedef struct _htree_node {
     void    *htab[HTREE_HASHTAB_SIZE];
 } htree_node;
 
+static inline bool is_leaf_node(const htree_node *node)
+{
+    for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
+        if (node->hcnt[hidx] == -1)
+            return false;
+    }
+    return true;
+}
+
+/* Callback invoked by htree_elem_traverse_dfs_bycnt after each elem is unlinked
+ * from the chain (ELEM_DELETE_NORMAL path, per-elem CLOG needed).
+ * The traversal has already called htree_elem_unlink and htree_elem_free before
+ * invoking this callback.  The callback is responsible only for CLOG and ccnt
+ * decrement; space accounting is handled via space_delta_out on the traversal.
+ * When NULL is passed, the traversal performs a plain unlink+free with no callback
+ * (collection-delete path where no per-elem CLOG is needed). */
+typedef void (*htree_elem_unlink_func)(void *meta, htree_elem_item *elem);
+
 /* Unlink elem from node->htab[hidx] chain (prev is the predecessor, NULL if head).
  * Sets elem->status to ELEM_STATUS_UNLINKED; decrements node->hcnt[hidx] and
  * node->tot_elem_cnt.  Does NOT free elem or update ancestor tot_elem_cnt —
@@ -144,5 +162,26 @@ ENGINE_ERROR_CODE htree_elem_insert(htree_node      **root_pptr,
                                     htree_elem_item **old_elem_out,
                                     ssize_t          *space_delta_out,
                                     const void       *cookie);
+
+/* DFS traversal of the hash tree, collecting up to count elems (0 = all).
+ * If delete is false, fills elem_array[] with refcount-bumped elem pointers
+ * and returns the count found.
+ * If delete is true, each elem is unlinked and freed internally.
+ *   - If unlink_fn is non-NULL (ELEM_DELETE_NORMAL), it is called after each
+ *     unlink+free for per-elem CLOG and ccnt decrement.
+ *   - If unlink_fn is NULL (ELEM_DELETE_COLL), plain unlink+free with no callback.
+ * space_delta_out accumulates the total (negative) slab space freed for elems;
+ * node collapse space is not included (caller handles that separately).
+ * elem_array may be NULL on the delete path.
+ * Ancestor tot_elem_cnt is decremented on the way back up after each child
+ * subtree is processed. */
+int htree_elem_traverse_dfs_bycnt(htree_node            **root_pptr,
+                                   htree_node             *node,
+                                   uint32_t                count,
+                                   bool                    delete,
+                                   htree_elem_item       **elem_array,
+                                   htree_elem_unlink_func  unlink_fn,
+                                   void                   *meta,
+                                   ssize_t                *space_delta_out);
 
 #endif

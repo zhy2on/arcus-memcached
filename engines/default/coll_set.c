@@ -109,14 +109,6 @@ static inline uint32_t do_set_elem_ntotal(set_elem_item *elem)
     return offsetof(set_elem_item, data) + elem->nbytes;
 }
 
-static inline bool is_leaf_node(htree_node *node)
-{
-    for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
-        if (node->hcnt[hidx] == -1)
-            return false;
-    }
-    return true;
-}
 
 static ENGINE_ERROR_CODE do_set_item_find(const void *key, const uint32_t nkey,
                                           bool do_update, hash_item **item)
@@ -216,6 +208,13 @@ static void do_set_elem_unlink(set_meta_info *info,
         htree_elem_free(elem);
 }
 
+static void do_set_elem_unlink_clog(void *meta, htree_elem_item *elem)
+{
+    set_meta_info *info = (set_meta_info *)meta;
+    info->ccnt--;
+    CLOG_SET_ELEM_DELETE(info, elem, ELEM_DELETE_NORMAL);
+}
+
 static set_elem_item *do_set_elem_find(set_meta_info *info, const char *val, const int vlen)
 {
     set_elem_item *elem = NULL;
@@ -304,40 +303,15 @@ static int do_set_elem_traverse_dfs(set_meta_info *info, htree_node *node,
                                     const uint32_t count, const bool delete,
                                     set_elem_item **elem_array)
 {
-    int hidx;
-    int fcnt = 0; /* found count */
-
-    for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
-        if (node->hcnt[hidx] == -1) {
-            htree_node *child_node = (htree_node *)node->htab[hidx];
-            int rcnt = (count > 0 ? (count - fcnt) : 0);
-            int ecnt = do_set_elem_traverse_dfs(info, child_node, rcnt, delete,
-                                                (elem_array==NULL ? NULL : &elem_array[fcnt]));
-            fcnt += ecnt;
-            if (delete) {
-                if (child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE/2)
-                    && is_leaf_node(child_node)) {
-                    do_set_node_unlink(info, node, hidx);
-                }
-                node->tot_elem_cnt -= ecnt;
-            }
-        } else if (node->hcnt[hidx] > 0) {
-            set_elem_item *elem = node->htab[hidx];
-            while (elem != NULL) {
-                if (elem_array) {
-                    elem->refcount++;
-                    elem_array[fcnt] = elem;
-                }
-                fcnt++;
-                if (delete) do_set_elem_unlink(info, node, hidx, NULL, elem,
-                                               (elem_array==NULL ? ELEM_DELETE_COLL
-                                                                 : ELEM_DELETE_NORMAL));
-                if (count > 0 && fcnt >= count) break;
-                elem = (delete ? node->htab[hidx] : elem->next);
-            }
-        }
-        if (count > 0 && fcnt >= count) break;
-    }
+    ssize_t space_delta = 0;
+    htree_elem_unlink_func fn = (delete && elem_array != NULL) ? do_set_elem_unlink_clog : NULL;
+    int fcnt = htree_elem_traverse_dfs_bycnt((htree_node **)&info->root, node,
+                                             count, delete,
+                                             (htree_elem_item **)elem_array,
+                                             fn, info,
+                                             (fn != NULL) ? &space_delta : NULL);
+    if (fn != NULL && space_delta != 0)
+        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_SET, (size_t)-space_delta);
     return fcnt;
 }
 
@@ -420,9 +394,6 @@ static uint32_t do_set_elem_delete(set_meta_info *info, const uint32_t count,
     uint32_t fcnt = 0;
     if (info->root != NULL) {
         fcnt = do_set_elem_traverse_dfs(info, info->root, count, true, NULL);
-        if (info->root->tot_elem_cnt == 0) {
-            do_set_node_unlink(info, NULL, 0);
-        }
     }
     return fcnt;
 }
@@ -484,9 +455,9 @@ static uint32_t do_set_elem_get(set_meta_info *info,
         fcnt = do_set_elem_traverse_dfs(info, info->root, count, delete, elem_array);
     } else { /* Return some */
         fcnt = do_set_elem_traverse_rand(info, count, delete, elem_array);
-    }
-    if (delete && info->root->tot_elem_cnt == 0) {
-        do_set_node_unlink(info, NULL, 0);
+        if (delete && info->root != NULL && info->root->tot_elem_cnt == 0) {
+            do_set_node_unlink(info, NULL, 0);
+        }
     }
     if (delete) {
         CLOG_ELEM_DELETE_END((coll_meta_info*)info, ELEM_DELETE_NORMAL);
