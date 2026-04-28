@@ -150,32 +150,6 @@ static void do_set_elem_unlink_clog(void *meta, htree_elem_item *elem)
     CLOG_SET_ELEM_DELETE((set_meta_info *)meta, elem, ELEM_DELETE_NORMAL);
 }
 
-static set_elem_item *do_set_elem_find(set_meta_info *info, const char *val, const int vlen)
-{
-    set_elem_item *elem = NULL;
-
-    if (info->root != NULL) {
-        htree_node *node = info->root;
-        int hval = genhash_string_hash(val, vlen);
-        int hidx = 0;
-
-        while (node != NULL) {
-            hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
-            if (node->hcnt[hidx] >= 0) /* set element hash chain */
-                break;
-            node = node->htab[hidx];
-        }
-        assert(node != NULL);
-
-        for (elem = node->htab[hidx]; elem != NULL; elem = elem->next) {
-            if (hval == elem->hval && vlen == elem->nkey &&
-                memcmp(val, elem->data, vlen) == 0)
-                break;
-        }
-    }
-    return elem;
-}
-
 static ENGINE_ERROR_CODE do_set_elem_delete_with_value(set_meta_info *info,
                                                        const char *val, const int vlen,
                                                        enum elem_delete_cause cause)
@@ -419,10 +393,9 @@ ENGINE_ERROR_CODE set_elem_exist(const char *key, const uint32_t nkey,
             if ((info->mflags & COLL_META_FLAG_READABLE) == 0) {
                 ret = ENGINE_UNREADABLE; break;
             }
-            if (do_set_elem_find(info, value, nbytes) != NULL)
-                *exist = true;
-            else
-                *exist = false;
+            *exist = htree_elem_traverse_dfs_bykey((htree_node **)&info->root, info->root,
+                                                   nbytes, (const unsigned char *)value,
+                                                   false, NULL, NULL, NULL, NULL);
         } while (0);
         do_item_release(it);
     }
