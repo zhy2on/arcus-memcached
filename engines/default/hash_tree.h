@@ -77,15 +77,15 @@ void htree_node_unlink(htree_node **root_pptr,
                        ssize_t *space_delta_out);
 
 /* Allocate a new htree elem with space for nbytes bytes in data[].
- * Sets slabs_clsid, refcount, status, nkey, nbytes; caller must fill data[]. */
+ * Sets slabs_clsid, refcount, status, nkey, nbytes; caller must fill data[].
+ * hval is computed automatically by htree_elem_insert / htree_elem_update. */
 htree_elem_item *htree_elem_alloc(uint16_t nkey, uint16_t nbytes, const void *cookie);
 
 void htree_elem_free(htree_elem_item *elem);
 
 /* Update the value of an existing elem whose key matches elem->data[:nkey].
  *
- * Precondition: elem->hval must be set by the caller via
- * genhash_string_hash(elem->data, elem->nkey).
+ * Precondition: elem must be allocated via htree_elem_alloc (hval already set).
  *
  * Returns ENGINE_ELEM_ENOENT if no matching elem exists.
  *
@@ -104,8 +104,7 @@ ENGINE_ERROR_CODE htree_elem_update(htree_node      **root_pptr,
                                     htree_elem_item  *elem,
                                     bool              is_sticky,
                                     htree_elem_item **old_elem_out,
-                                    ssize_t          *space_delta_out,
-                                    const void       *cookie);
+                                    ssize_t          *space_delta_out);
 
 /* Insert elem into the hash tree rooted at *root_pptr.
  *

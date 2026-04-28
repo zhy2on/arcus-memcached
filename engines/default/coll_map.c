@@ -280,36 +280,27 @@ static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
                                             const field_t *field, const char *value,
                                             const uint32_t nbytes, const void *cookie)
 {
-    bool is_sticky = IS_STICKY_COLLFLG(info);
-    uint32_t hval = genhash_string_hash(field->value, field->length);
-
-    /* Build a temporary elem with the new <field, value> payload.
-     * htree_elem_update will do in-place memcpy if sizes match,
-     * or chain-replace otherwise. */
-    map_elem_item *new_elem = htree_elem_alloc(field->length, field->length + nbytes, cookie);
+    uint16_t new_nbytes = (uint16_t)(field->length + nbytes);
+    map_elem_item *new_elem = htree_elem_alloc(field->length, new_nbytes, cookie);
     if (new_elem == NULL)
         return ENGINE_ENOMEM;
 
     memcpy(new_elem->data, field->value, field->length);
     memcpy(new_elem->data + field->length, value, nbytes);
-    new_elem->hval = hval;
 
     map_elem_item *old_elem = NULL;
     ssize_t space_delta = 0;
-    ENGINE_ERROR_CODE ret;
-
-    ret = htree_elem_update((htree_node **)&info->root,
-                            new_elem,
-                            is_sticky,
-                            &old_elem,
-                            &space_delta, cookie);
+    ENGINE_ERROR_CODE ret = htree_elem_update((htree_node **)&info->root,
+                                              new_elem,
+                                              IS_STICKY_COLLFLG(info),
+                                              &old_elem, &space_delta);
     if (ret != ENGINE_SUCCESS) {
         htree_elem_free(new_elem);
         return ret;
     }
 
     if (old_elem->status == ELEM_STATUS_LINKED) {
-        /* in-place path: old_elem->data was overwritten in place, new_elem not linked */
+        /* in-place path: data overwritten in place, new_elem not linked */
         CLOG_MAP_ELEM_INSERT(info, old_elem, old_elem);
         htree_elem_free(new_elem);
     } else {

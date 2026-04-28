@@ -273,8 +273,7 @@ ENGINE_ERROR_CODE htree_elem_update(htree_node      **root_pptr,
                                     htree_elem_item  *elem,
                                     bool              is_sticky,
                                     htree_elem_item **old_elem_out,
-                                    ssize_t          *space_delta_out,
-                                    const void       *cookie)
+                                    ssize_t          *space_delta_out)
 {
     if (*root_pptr == NULL)
         return ENGINE_ELEM_ENOENT;
@@ -283,6 +282,7 @@ ENGINE_ERROR_CODE htree_elem_update(htree_node      **root_pptr,
     htree_elem_item *prev;
     int hidx;
 
+    elem->hval = genhash_string_hash(elem->data, elem->nkey);
     htree_elem_item *find = do_htree_find_leaf(*root_pptr, elem->hval,
                                                elem->nkey, elem->data,
                                                &node, &hidx, &prev);
