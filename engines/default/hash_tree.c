@@ -25,6 +25,9 @@
 #include "default_engine.h"
 #include "hash_tree.h"
 
+#define HTREE_GET_HASHIDX(hval, hdepth) \
+    (((hval) & (HTREE_HASHIDX_MASK << ((hdepth)*4))) >> ((hdepth)*4))
+
 extern int genhash_string_hash(const void *p, size_t nkey);
 
 static htree_node *do_htree_node_alloc(const uint8_t depth, const void *cookie)
@@ -48,8 +51,8 @@ static void do_htree_node_free(htree_node *node)
 }
 
 static void do_htree_elem_unlink(htree_node *node, int hidx,
-                       htree_elem_item *prev, htree_elem_item *elem,
-                       ssize_t *space_delta_out)
+                                 htree_elem_item *prev, htree_elem_item *elem,
+                                 ssize_t *space_delta_out)
 {
     if (prev != NULL) prev->next = elem->next;
     else              node->htab[hidx] = elem->next;
@@ -63,8 +66,8 @@ static void do_htree_elem_unlink(htree_node *node, int hidx,
 }
 
 static void do_htree_node_unlink(htree_node **root_pptr,
-                       htree_node *par_node, const int par_hidx,
-                       ssize_t *space_delta_out)
+                                 htree_node *par_node, const int par_hidx,
+                                 ssize_t *space_delta_out)
 {
     htree_node *node;
 
@@ -285,11 +288,11 @@ static ENGINE_ERROR_CODE do_htree_elem_insert(htree_node **root_pptr,
     return ENGINE_SUCCESS;
 }
 
-ENGINE_ERROR_CODE htree_elem_update(htree_node      **root_pptr,
-                                    htree_elem_item  *elem,
-                                    bool              is_sticky,
+ENGINE_ERROR_CODE htree_elem_update(htree_node **root_pptr,
+                                    htree_elem_item *elem,
+                                    bool is_sticky,
                                     htree_elem_item **old_elem_out,
-                                    ssize_t          *space_delta_out)
+                                    ssize_t *space_delta_out)
 {
     if (*root_pptr == NULL)
         return ENGINE_ELEM_ENOENT;
@@ -317,13 +320,13 @@ ENGINE_ERROR_CODE htree_elem_update(htree_node      **root_pptr,
                                  is_sticky, old_elem_out, space_delta_out);
 }
 
-static htree_elem_item *htree_elem_at_offset(htree_node            **root_pptr,
-                                       htree_node             *node,
-                                       uint32_t                offset,
-                                       bool                    delete,
-                                       htree_elem_unlink_func  unlink_fn,
-                                       void                   *meta,
-                                       ssize_t                *space_delta_out)
+static htree_elem_item *do_htree_elem_at_offset(htree_node **root_pptr,
+                                                htree_node *node,
+                                                uint32_t offset,
+                                                bool delete,
+                                                htree_elem_unlink_func unlink_fn,
+                                                void *meta,
+                                                ssize_t *space_delta_out)
 {
     for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
         if (node->hcnt[hidx] == -1) {
@@ -332,10 +335,10 @@ static htree_elem_item *htree_elem_at_offset(htree_node            **root_pptr,
                 offset -= child_node->tot_elem_cnt;
                 continue;
             }
-            htree_elem_item *found = htree_elem_at_offset(root_pptr, child_node,
-                                                          offset, delete,
-                                                          unlink_fn, meta,
-                                                          space_delta_out);
+            htree_elem_item *found = do_htree_elem_at_offset(root_pptr, child_node,
+                                                             offset, delete,
+                                                             unlink_fn, meta,
+                                                             space_delta_out);
             if (delete) {
                 if (is_leaf_node(child_node) &&
                     child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE / 2)) {
@@ -374,17 +377,17 @@ static htree_elem_item *htree_elem_at_offset(htree_node            **root_pptr,
     return NULL;
 }
 
-static int htree_elem_traverse_sampling(htree_node      *node,
-                                  uint32_t         remain,
-                                  uint32_t         count,
-                                  htree_elem_item **elem_array)
+static int do_htree_elem_traverse_sampling(htree_node *node,
+                                           uint32_t remain,
+                                           uint32_t count,
+                                           htree_elem_item **elem_array)
 {
     int fcnt = 0;
     for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
         if (node->hcnt[hidx] == -1) {
             htree_node *child_node = (htree_node *)node->htab[hidx];
-            fcnt += htree_elem_traverse_sampling(child_node, remain,
-                                                 count - fcnt, &elem_array[fcnt]);
+            fcnt += do_htree_elem_traverse_sampling(child_node, remain,
+                                                    count - fcnt, &elem_array[fcnt]);
             remain -= child_node->tot_elem_cnt;
         } else if (node->hcnt[hidx] > 0) {
             htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
@@ -403,25 +406,25 @@ static int htree_elem_traverse_sampling(htree_node      *node,
     return fcnt;
 }
 
-int htree_elem_traverse_rand(htree_node            **root_pptr,
-                              htree_node             *node,
-                              uint32_t                total_count,
-                              uint32_t                count,
-                              bool                    delete,
-                              htree_elem_item       **elem_array,
-                              htree_elem_unlink_func  unlink_fn,
-                              void                   *meta,
-                              ssize_t                *space_delta_out)
+int htree_elem_traverse_rand(htree_node **root_pptr,
+                             htree_node *node,
+                             uint32_t total_count,
+                             uint32_t count,
+                             bool delete,
+                             htree_elem_item **elem_array,
+                             htree_elem_unlink_func unlink_fn,
+                             void *meta,
+                             ssize_t *space_delta_out)
 {
     int fcnt = 0;
 
     if (delete) {
         while ((uint32_t)fcnt < count) {
             uint32_t rand_offset = (uint32_t)(rand() % (int)total_count);
-            htree_elem_item *found = htree_elem_at_offset(root_pptr, node,
-                                                          rand_offset, delete,
-                                                          unlink_fn, meta,
-                                                          space_delta_out);
+            htree_elem_item *found = do_htree_elem_at_offset(root_pptr, node,
+                                                             rand_offset, delete,
+                                                             unlink_fn, meta,
+                                                             space_delta_out);
             assert(found != NULL);
             elem_array[fcnt++] = found;
             total_count--;
@@ -447,9 +450,9 @@ int htree_elem_traverse_rand(htree_node            **root_pptr,
             }
             if (!dup && b->cnt < 3) {
                 b->keys[b->cnt++] = rand_offset;
-                htree_elem_item *found = htree_elem_at_offset(root_pptr, node,
-                                                              rand_offset, false,
-                                                              NULL, NULL, NULL);
+                htree_elem_item *found = do_htree_elem_at_offset(root_pptr, node,
+                                                                 rand_offset, false,
+                                                                 NULL, NULL, NULL);
                 assert(found != NULL);
                 elem_array[fcnt++] = found;
             }
@@ -457,7 +460,7 @@ int htree_elem_traverse_rand(htree_node            **root_pptr,
         free(buckets);
     } else {
         /* dense: reservoir sampling + Fisher-Yates shuffle */
-        fcnt = htree_elem_traverse_sampling(node, total_count, count, elem_array);
+        fcnt = do_htree_elem_traverse_sampling(node, total_count, count, elem_array);
         for (int i = fcnt - 1; i > 0; i--) {
             int rand_idx = rand() % (i + 1);
             if (rand_idx != i) {
@@ -470,16 +473,16 @@ int htree_elem_traverse_rand(htree_node            **root_pptr,
     return fcnt;
 }
 
-static bool do_htree_elem_traverse_bykey(htree_node            **root_pptr,
-                                         htree_node             *node,
-                                         uint32_t                hval,
-                                         uint16_t                nkey,
-                                         const unsigned char    *data,
-                                         bool                    delete,
-                                         htree_elem_item       **elem_out,
-                                         htree_elem_unlink_func  unlink_fn,
-                                         void                   *meta,
-                                         ssize_t                *space_delta_out)
+static bool do_htree_elem_traverse_bykey(htree_node **root_pptr,
+                                         htree_node *node,
+                                         uint32_t hval,
+                                         uint16_t nkey,
+                                         const unsigned char *data,
+                                         bool delete,
+                                         htree_elem_item **elem_out,
+                                         htree_elem_unlink_func unlink_fn,
+                                         void *meta,
+                                         ssize_t *space_delta_out)
 {
     int hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
 
@@ -529,15 +532,15 @@ static bool do_htree_elem_traverse_bykey(htree_node            **root_pptr,
     return false;
 }
 
-bool htree_elem_traverse_dfs_bykey(htree_node            **root_pptr,
-                                    htree_node             *node,
-                                    uint16_t                nkey,
-                                    const unsigned char    *data,
-                                    bool                    delete,
-                                    htree_elem_item       **elem_out,
-                                    htree_elem_unlink_func  unlink_fn,
-                                    void                   *meta,
-                                    ssize_t                *space_delta_out)
+bool htree_elem_traverse_dfs_bykey(htree_node **root_pptr,
+                                   htree_node *node,
+                                   uint16_t nkey,
+                                   const unsigned char *data,
+                                   bool delete,
+                                   htree_elem_item **elem_out,
+                                   htree_elem_unlink_func unlink_fn,
+                                   void *meta,
+                                   ssize_t *space_delta_out)
 {
     uint32_t hval = genhash_string_hash(data, nkey);
     bool found = do_htree_elem_traverse_bykey(root_pptr, node, hval, nkey, data,
@@ -551,14 +554,14 @@ bool htree_elem_traverse_dfs_bykey(htree_node            **root_pptr,
     return found;
 }
 
-int htree_elem_traverse_dfs_bycnt(htree_node            **root_pptr,
-                                   htree_node             *node,
-                                   uint32_t                count,
-                                   bool                    delete,
-                                   htree_elem_item       **elem_array,
-                                   htree_elem_unlink_func  unlink_fn,
-                                   void                   *meta,
-                                   ssize_t                *space_delta_out)
+int htree_elem_traverse_dfs_bycnt(htree_node **root_pptr,
+                                  htree_node *node,
+                                  uint32_t count,
+                                  bool delete,
+                                  htree_elem_item **elem_array,
+                                  htree_elem_unlink_func unlink_fn,
+                                  void *meta,
+                                  ssize_t *space_delta_out)
 {
     int hidx;
     int fcnt = 0;
@@ -615,14 +618,14 @@ int htree_elem_traverse_dfs_bycnt(htree_node            **root_pptr,
     return fcnt;
 }
 
-ENGINE_ERROR_CODE htree_elem_insert(htree_node      **root_pptr,
-                                    htree_elem_item  *elem,
-                                    bool              replace_if_exist,
-                                    bool              is_sticky,
-                                    int               max_count,
+ENGINE_ERROR_CODE htree_elem_insert(htree_node **root_pptr,
+                                    htree_elem_item *elem,
+                                    bool replace_if_exist,
+                                    bool is_sticky,
+                                    int max_count,
                                     htree_elem_item **old_elem_out,
-                                    ssize_t          *space_delta_out,
-                                    const void       *cookie)
+                                    ssize_t *space_delta_out,
+                                    const void *cookie)
 {
     bool new_root = false;
 

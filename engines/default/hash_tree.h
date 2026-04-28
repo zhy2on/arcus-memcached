@@ -27,9 +27,6 @@
 #define HTREE_HASHIDX_MASK       0x0000000F
 #define HTREE_MAX_HASHCHAIN_SIZE 64
 
-#define HTREE_GET_HASHIDX(hval, hdepth) \
-    (((hval) & (HTREE_HASHIDX_MASK << ((hdepth)*4))) >> ((hdepth)*4))
-
 typedef struct _htree_elem_item {
     uint16_t refcount;
     uint8_t  slabs_clsid;
@@ -60,48 +57,48 @@ void htree_elem_release(htree_elem_item *elem);
 
 uint32_t htree_elem_ntotal(htree_elem_item *elem);
 
-ENGINE_ERROR_CODE htree_elem_update(htree_node      **root_pptr,
-                                    htree_elem_item  *elem,
-                                    bool              is_sticky,
+ENGINE_ERROR_CODE htree_elem_update(htree_node **root_pptr,
+                                    htree_elem_item *elem,
+                                    bool is_sticky,
                                     htree_elem_item **old_elem_out,
-                                    ssize_t          *space_delta_out);
+                                    ssize_t *space_delta_out);
 
-ENGINE_ERROR_CODE htree_elem_insert(htree_node      **root_pptr,
-                                    htree_elem_item  *elem,
-                                    bool              replace_if_exist,
-                                    bool              is_sticky,
-                                    int               max_count,
+ENGINE_ERROR_CODE htree_elem_insert(htree_node **root_pptr,
+                                    htree_elem_item *elem,
+                                    bool replace_if_exist,
+                                    bool is_sticky,
+                                    int max_count,
                                     htree_elem_item **old_elem_out,
-                                    ssize_t          *space_delta_out,
-                                    const void       *cookie);
+                                    ssize_t *space_delta_out,
+                                    const void *cookie);
 
-int htree_elem_traverse_rand(htree_node            **root_pptr,
-                              htree_node             *node,
-                              uint32_t                total_count,
-                              uint32_t                count,
-                              bool                    delete,
-                              htree_elem_item       **elem_array,
-                              htree_elem_unlink_func  unlink_fn,
-                              void                   *meta,
-                              ssize_t                *space_delta_out);
+int htree_elem_traverse_rand(htree_node **root_pptr,
+                             htree_node *node,
+                             uint32_t total_count,
+                             uint32_t count,
+                             bool delete,
+                             htree_elem_item **elem_array,
+                             htree_elem_unlink_func unlink_fn,
+                             void *meta,
+                             ssize_t *space_delta_out);
 
-bool htree_elem_traverse_dfs_bykey(htree_node            **root_pptr,
-                                    htree_node             *node,
-                                    uint16_t                nkey,
-                                    const unsigned char    *data,
-                                    bool                    delete,
-                                    htree_elem_item       **elem_out,
-                                    htree_elem_unlink_func  unlink_fn,
-                                    void                   *meta,
-                                    ssize_t                *space_delta_out);
+bool htree_elem_traverse_dfs_bykey(htree_node **root_pptr,
+                                   htree_node *node,
+                                   uint16_t nkey,
+                                   const unsigned char *data,
+                                   bool delete,
+                                   htree_elem_item **elem_out,
+                                   htree_elem_unlink_func unlink_fn,
+                                   void *meta,
+                                   ssize_t *space_delta_out);
 
-int htree_elem_traverse_dfs_bycnt(htree_node            **root_pptr,
-                                   htree_node             *node,
-                                   uint32_t                count,
-                                   bool                    delete,
-                                   htree_elem_item       **elem_array,
-                                   htree_elem_unlink_func  unlink_fn,
-                                   void                   *meta,
-                                   ssize_t                *space_delta_out);
+int htree_elem_traverse_dfs_bycnt(htree_node **root_pptr,
+                                  htree_node *node,
+                                  uint32_t count,
+                                  bool delete,
+                                  htree_elem_item **elem_array,
+                                  htree_elem_unlink_func unlink_fn,
+                                  void *meta,
+                                  ssize_t *space_delta_out);
 
 #endif
