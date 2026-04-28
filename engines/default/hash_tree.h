@@ -103,6 +103,8 @@ void htree_elem_free(htree_elem_item *elem);
 
 void htree_elem_release(htree_elem_item *elem);
 
+uint32_t htree_elem_ntotal(htree_elem_item *elem);
+
 /* Update the value of an existing elem whose key matches elem->data[:nkey].
  *
  * Precondition: elem must be allocated via htree_elem_alloc (hval already set).

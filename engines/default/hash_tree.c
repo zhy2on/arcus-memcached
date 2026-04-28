@@ -27,7 +27,6 @@
 
 extern int genhash_string_hash(const void *p, size_t nkey);
 
-
 static htree_node *do_htree_node_alloc(const uint8_t depth, const void *cookie)
 {
     size_t ntotal = sizeof(htree_node);
@@ -135,6 +134,11 @@ void htree_elem_release(htree_elem_item *elem)
     if (elem->refcount == 0 && elem->status == ELEM_STATUS_UNLINKED) {
         htree_elem_free(elem);
     }
+}
+
+uint32_t htree_elem_ntotal(htree_elem_item *elem)
+{
+    return offsetof(htree_elem_item, data) + elem->nbytes;
 }
 
 /* Redistribute elems from par_node->htab[par_hidx] into new child node,

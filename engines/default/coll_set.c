@@ -57,11 +57,6 @@ static inline void UNLOCK_CACHE(void)
 /*
  * SET collection manangement
  */
-static inline uint32_t do_set_elem_ntotal(set_elem_item *elem)
-{
-    return offsetof(set_elem_item, data) + elem->nbytes;
-}
-
 static ENGINE_ERROR_CODE do_set_item_find(const void *key, const uint32_t nkey,
                                           bool do_update, hash_item **item)
 {
@@ -125,7 +120,6 @@ static hash_item *do_set_item_alloc(const void *key, const uint32_t nkey,
     }
     return it;
 }
-
 
 static void do_set_node_unlink(set_meta_info *info,
                                htree_node *par_node, const int par_hidx)
@@ -476,7 +470,7 @@ void set_elem_get_all(set_meta_info *info, elems_result_t *eresult)
 
 uint32_t set_elem_ntotal(set_elem_item *elem)
 {
-    return do_set_elem_ntotal(elem);
+    return htree_elem_ntotal((htree_elem_item *)elem);
 }
 
 ENGINE_ERROR_CODE set_coll_getattr(hash_item *it, item_attr *attrp,
