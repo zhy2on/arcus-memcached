@@ -46,6 +46,85 @@ static void do_htree_node_free(htree_node *node)
     do_item_mem_free(node, sizeof(htree_node));
 }
 
+void htree_elem_unlink(htree_node *node, int hidx,
+                       htree_elem_item *prev, htree_elem_item *elem,
+                       ssize_t *space_delta_out)
+{
+    if (prev != NULL) prev->next = elem->next;
+    else              node->htab[hidx] = elem->next;
+    elem->status      = ELEM_STATUS_UNLINKED;
+    node->hcnt[hidx] -= 1;
+    node->tot_elem_cnt -= 1;
+
+    if (space_delta_out)
+        *space_delta_out = -(ssize_t)slabs_space_size(
+                               offsetof(htree_elem_item, data) + elem->nbytes);
+}
+
+void htree_node_unlink(htree_node **root_pptr,
+                       htree_node *par_node, const int par_hidx,
+                       ssize_t *space_delta_out)
+{
+    htree_node *node;
+
+    if (par_node == NULL) {
+        node = *root_pptr;
+        *root_pptr = NULL;
+        assert(node->tot_elem_cnt == 0);
+    } else {
+        assert(par_node->hcnt[par_hidx] == -1); /* child hash node */
+        htree_elem_item *head = NULL;
+        htree_elem_item *elem;
+        int hidx, fcnt = 0;
+
+        node = (htree_node *)par_node->htab[par_hidx];
+
+        for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
+            assert(node->hcnt[hidx] >= 0);
+            if (node->hcnt[hidx] > 0) {
+                fcnt += node->hcnt[hidx];
+                while (node->htab[hidx] != NULL) {
+                    elem = (htree_elem_item *)node->htab[hidx];
+                    node->htab[hidx] = elem->next;
+                    node->hcnt[hidx] -= 1;
+                    elem->next = head;
+                    head = elem;
+                }
+                assert(node->hcnt[hidx] == 0);
+            }
+        }
+        assert(fcnt == (int)node->tot_elem_cnt);
+        node->tot_elem_cnt = 0;
+
+        par_node->htab[par_hidx] = head;
+        par_node->hcnt[par_hidx] = fcnt;
+    }
+
+    if (space_delta_out)
+        *space_delta_out = -(ssize_t)slabs_space_size(sizeof(htree_node));
+
+    do_htree_node_free(node);
+}
+
+htree_elem_item *htree_elem_alloc(uint16_t nkey, uint16_t nbytes, const void *cookie)
+{
+    size_t ntotal = offsetof(htree_elem_item, data) + nbytes;
+    htree_elem_item *elem = do_item_mem_alloc(ntotal, LRU_CLSID_FOR_SMALL, cookie);
+    if (elem != NULL) {
+        elem->slabs_clsid = slabs_clsid(ntotal);
+        elem->refcount    = 0;
+        elem->status      = ELEM_STATUS_UNLINKED;
+        elem->nkey        = nkey;
+        elem->nbytes      = nbytes;
+    }
+    return elem;
+}
+
+void htree_elem_free(htree_elem_item *elem)
+{
+    do_item_mem_free(elem, offsetof(htree_elem_item, data) + elem->nbytes);
+}
+
 /* Redistribute elems from par_node->htab[par_hidx] into new child node,
  * then install child into par_node's slot. */
 static void do_htree_node_link(htree_node *par_node, const int par_hidx,

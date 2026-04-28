@@ -179,31 +179,11 @@ typedef struct _list_elem_item {
     char     value[];             /**< the data itself */
 } list_elem_item;
 
-/* set element — leading fields match htree_elem_item layout exactly.
- * nkey == nbytes: the whole value is the lookup key. */
-typedef struct _set_elem_item {
-    uint16_t refcount;
-    uint8_t  slabs_clsid;         /* which slab class we're in */
-    uint8_t  status;              /* element lifecycle state: linked(in-set) or unlinked(removed but referenced) */
-    uint32_t hval;                /* hash value (computed by htree on insert) */
-    struct _set_elem_item *next;  /* hash chain next */
-    uint16_t nkey;                /* == nbytes for set */
-    uint16_t nbytes;              /* total size of data[] */
-    unsigned char data[];         /* the value itself */
-} set_elem_item;
-
-/* map element — leading fields match htree_elem_item layout exactly.
- * nkey == field length; nbytes == field + value length. */
-typedef struct _map_elem_item {
-    uint16_t refcount;
-    uint8_t  slabs_clsid;         /* which slab class we're in */
-    uint8_t  status;              /* element lifecycle state: linked(in-map) or unlinked(removed but referenced) */
-    uint32_t hval;                /* hash value (computed by htree on insert) */
-    struct _map_elem_item *next;  /* hash chain next */
-    uint16_t nkey;                /* field length in data[] */
-    uint16_t nbytes;              /* total size of data[]: field + value */
-    unsigned char data[];         /* data: <field, value> */
-} map_elem_item;
+/* set/map elements are the canonical htree elem type.
+ * set:  nkey == nbytes (the whole value is the lookup key).
+ * map:  nkey == field length, nbytes == field + value length. */
+typedef htree_elem_item set_elem_item;
+typedef htree_elem_item map_elem_item;
 
 /* btree element */
 typedef struct _btree_elem_item {

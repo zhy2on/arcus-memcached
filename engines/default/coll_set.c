@@ -182,92 +182,23 @@ static hash_item *do_set_item_alloc(const void *key, const uint32_t nkey,
     return it;
 }
 
-static void do_set_node_free(htree_node *node)
-{
-    do_item_mem_free(node, sizeof(htree_node));
-}
-
-static set_elem_item *do_set_elem_alloc(const uint32_t nbytes, const void *cookie)
-{
-    size_t ntotal = offsetof(set_elem_item, data) + nbytes;
-
-    set_elem_item *elem = do_item_mem_alloc(ntotal, LRU_CLSID_FOR_SMALL, cookie);
-    if (elem != NULL) {
-        elem->slabs_clsid = slabs_clsid(ntotal);
-        assert(elem->slabs_clsid > 0);
-
-        elem->refcount = 0;
-        elem->nkey     = (uint16_t)nbytes; /* whole value is the key for set */
-        elem->nbytes   = (uint16_t)nbytes;
-        elem->status   = ELEM_STATUS_UNLINKED;
-    }
-    return elem;
-}
-
-static void do_set_elem_free(set_elem_item *elem)
-{
-    assert(elem->refcount == 0);
-    assert(elem->slabs_clsid != 0);
-    size_t ntotal = do_set_elem_ntotal(elem);
-    do_item_mem_free(elem, ntotal);
-}
-
 static void do_set_elem_release(set_elem_item *elem)
 {
     if (elem->refcount != 0) {
         elem->refcount--;
     }
     if (elem->refcount == 0 && elem->status == ELEM_STATUS_UNLINKED) {
-        do_set_elem_free(elem);
+        htree_elem_free(elem);
     }
 }
 
 static void do_set_node_unlink(set_meta_info *info,
                                htree_node *par_node, const int par_hidx)
 {
-    htree_node *node;
-
-    if (par_node == NULL) {
-        node = info->root;
-        info->root = NULL;
-        assert(node->tot_elem_cnt == 0);
-    } else {
-        assert(par_node->hcnt[par_hidx] == -1); /* child hash node */
-        set_elem_item *head = NULL;
-        set_elem_item *elem;
-        int hidx, fcnt = 0;
-
-        node = (htree_node *)par_node->htab[par_hidx];
-
-        for (hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
-            assert(node->hcnt[hidx] >= 0);
-            if (node->hcnt[hidx] > 0) {
-                fcnt += node->hcnt[hidx];
-                while (node->htab[hidx] != NULL) {
-                    elem = node->htab[hidx];
-                    node->htab[hidx] = elem->next;
-                    node->hcnt[hidx] -= 1;
-
-                    elem->next = head;
-                    head = elem;
-                }
-                assert(node->hcnt[hidx] == 0);
-            }
-        }
-        assert(fcnt == node->tot_elem_cnt);
-        node->tot_elem_cnt = 0;
-
-        par_node->htab[par_hidx] = head;
-        par_node->hcnt[par_hidx] = fcnt;
-    }
-
-    if (info->stotal > 0) { /* apply memory space */
-        size_t stotal = slabs_space_size(sizeof(htree_node));
-        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
-    }
-
-    /* free the node */
-    do_set_node_free(node);
+    ssize_t space_delta = 0;
+    htree_node_unlink((htree_node **)&info->root, par_node, par_hidx, &space_delta);
+    if (info->stotal > 0)
+        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_SET, (size_t)-space_delta);
 }
 
 static void do_set_elem_unlink(set_meta_info *info,
@@ -275,23 +206,14 @@ static void do_set_elem_unlink(set_meta_info *info,
                                set_elem_item *prev, set_elem_item *elem,
                                enum elem_delete_cause cause)
 {
-    if (prev != NULL) prev->next = elem->next;
-    else              node->htab[hidx] = elem->next;
-    elem->status = ELEM_STATUS_UNLINKED;
-    node->hcnt[hidx] -= 1;
-    node->tot_elem_cnt -= 1;
+    ssize_t space_delta = 0;
+    htree_elem_unlink(node, hidx, prev, elem, &space_delta);
     info->ccnt--;
-
     CLOG_SET_ELEM_DELETE(info, elem, cause);
-
-    if (info->stotal > 0) { /* apply memory space */
-        size_t stotal = slabs_space_size(do_set_elem_ntotal(elem));
-        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
-    }
-
-    if (elem->refcount == 0) {
-        do_set_elem_free(elem);
-    }
+    if (info->stotal > 0)
+        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_SET, (size_t)-space_delta);
+    if (elem->refcount == 0)
+        htree_elem_free(elem);
 }
 
 static set_elem_item *do_set_elem_find(set_meta_info *info, const char *val, const int vlen)
@@ -582,7 +504,7 @@ static ENGINE_ERROR_CODE do_set_elem_insert(hash_item *it, set_elem_item *elem,
 
     ssize_t space_delta = 0;
     ret = htree_elem_insert((htree_node **)&info->root,
-                            (htree_elem_item *)elem,
+                            elem,
                             false, is_sticky, real_mcnt, NULL, &space_delta, cookie);
     if (ret != ENGINE_SUCCESS)
         return ret;
@@ -627,7 +549,7 @@ set_elem_item *set_elem_alloc(const uint32_t nbytes, const void *cookie)
 {
     set_elem_item *elem;
     LOCK_CACHE();
-    elem = do_set_elem_alloc(nbytes, cookie);
+    elem = htree_elem_alloc(nbytes, nbytes, cookie);
     UNLOCK_CACHE();
     return elem;
 }
@@ -636,7 +558,7 @@ void set_elem_free(set_elem_item *elem)
 {
     LOCK_CACHE();
     assert(elem->status == ELEM_STATUS_UNLINKED);
-    do_set_elem_free(elem);
+    htree_elem_free(elem);
     UNLOCK_CACHE();
 }
 
@@ -987,7 +909,6 @@ ENGINE_ERROR_CODE set_apply_item_link(void *engine, const char *key, const uint3
     return ret;
 }
 
-
 ENGINE_ERROR_CODE set_apply_elem_insert(void *engine, hash_item *it,
                                         const char *value, const uint32_t nbytes)
 {
@@ -1006,7 +927,7 @@ ENGINE_ERROR_CODE set_apply_elem_insert(void *engine, hash_item *it,
             ret = ENGINE_KEY_ENOENT; break;
         }
 
-        elem = do_set_elem_alloc(nbytes, NULL);
+        elem = htree_elem_alloc(nbytes, nbytes, NULL);
         if (elem == NULL) {
             logger->log(EXTENSION_LOG_WARNING, NULL, "set_apply_elem_insert failed."
                         " element alloc failed. nbytes=%d\n", nbytes);
@@ -1016,7 +937,7 @@ ENGINE_ERROR_CODE set_apply_elem_insert(void *engine, hash_item *it,
 
         ret = do_set_elem_insert(it, elem, NULL);
         if (ret != ENGINE_SUCCESS) {
-            do_set_elem_free(elem);
+            htree_elem_free(elem);
             logger->log(EXTENSION_LOG_WARNING, NULL, "set_apply_elem_insert failed."
                         " key=%.*s nkey=%u code=%d\n",
                         PRINT_NKEY(it->nkey), key, it->nkey, ret);

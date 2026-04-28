@@ -36,12 +36,12 @@
  * bytes are the lookup key (used for hval computation and match).
  * For set: nkey == nbytes (the whole value is the key).
  * For map: nkey == field length, nbytes == field + value length. */
-typedef struct {
+typedef struct _htree_elem_item {
     uint16_t refcount;
     uint8_t  slabs_clsid;
     uint8_t  status;
     uint32_t hval;
-    void    *next;
+    struct _htree_elem_item *next;
     uint16_t nkey;          /* bytes of data[] used as lookup key */
     uint16_t nbytes;        /* total bytes in data[] */
     unsigned char data[];   /* offsetof = 20 */
@@ -57,6 +57,30 @@ typedef struct _htree_node {
     int16_t  hcnt[HTREE_HASHTAB_SIZE];
     void    *htab[HTREE_HASHTAB_SIZE];
 } htree_node;
+
+/* Unlink elem from node->htab[hidx] chain (prev is the predecessor, NULL if head).
+ * Sets elem->status to ELEM_STATUS_UNLINKED; decrements node->hcnt[hidx] and
+ * node->tot_elem_cnt.  Does NOT free elem or update ancestor tot_elem_cnt —
+ * the caller's traversal handles ancestor updates on the way back up.
+ * *space_delta_out is set to the (negative) slab space of the elem. */
+void htree_elem_unlink(htree_node *node, int hidx,
+                       htree_elem_item *prev, htree_elem_item *elem,
+                       ssize_t *space_delta_out);
+
+/* Collapse the child node at par_node->htab[par_hidx] back into par_node's
+ * direct slot (node split reversal).  If par_node is NULL, the root node
+ * (*root_pptr) is freed and *root_pptr is set to NULL (must have
+ * tot_elem_cnt == 0).  On success *space_delta_out is set to the (negative)
+ * slab space freed for the node. */
+void htree_node_unlink(htree_node **root_pptr,
+                       htree_node *par_node, int par_hidx,
+                       ssize_t *space_delta_out);
+
+/* Allocate a new htree elem with space for nbytes bytes in data[].
+ * Sets slabs_clsid, refcount, status, nkey, nbytes; caller must fill data[]. */
+htree_elem_item *htree_elem_alloc(uint16_t nkey, uint16_t nbytes, const void *cookie);
+
+void htree_elem_free(htree_elem_item *elem);
 
 /* Update the value of an existing elem whose key matches elem->data[:nkey].
  *
