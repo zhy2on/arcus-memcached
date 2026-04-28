@@ -185,7 +185,11 @@ static ENGINE_ERROR_CODE do_set_elem_insert(hash_item *it, set_elem_item *elem,
 {
     set_meta_info *info = (set_meta_info *)item_get_meta(it);
     int real_mcnt = (int)(info->mcnt > 0 ? info->mcnt : config->max_set_size);
+#ifdef ENABLE_STICKY_ITEM
     bool is_sticky = IS_STICKY_EXPTIME(it->exptime);
+#else
+    bool is_sticky = false;
+#endif
     ENGINE_ERROR_CODE ret;
 
     ssize_t space_delta = 0;

@@ -158,9 +158,14 @@ static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
 
     map_elem_item *old_elem = NULL;
     ssize_t space_delta = 0;
+#ifdef ENABLE_STICKY_ITEM
+    bool is_sticky = IS_STICKY_COLLFLG(info);
+#else
+    bool is_sticky = false;
+#endif
     ENGINE_ERROR_CODE ret = htree_elem_update((htree_node **)&info->root,
                                               new_elem,
-                                              IS_STICKY_COLLFLG(info),
+                                              is_sticky,
                                               &old_elem, &space_delta);
     if (ret != ENGINE_SUCCESS) {
         htree_elem_free(new_elem);
@@ -230,7 +235,11 @@ static ENGINE_ERROR_CODE do_map_elem_insert(hash_item *it, map_elem_item *elem,
 {
     map_meta_info *info = (map_meta_info *)item_get_meta(it);
     int real_mcnt = (int)(info->mcnt > 0 ? info->mcnt : config->max_map_size);
+#ifdef ENABLE_STICKY_ITEM
     bool is_sticky = IS_STICKY_COLLFLG(info);
+#else
+    bool is_sticky = false;
+#endif
     map_elem_item *old_elem = NULL;
     ssize_t space_delta = 0;
     ENGINE_ERROR_CODE ret;
