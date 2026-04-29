@@ -25,6 +25,9 @@
 #include "default_engine.h"
 #include "hash_tree.h"
 
+#define HTREE_HASHIDX_MASK       0x0000000F
+#define HTREE_MAX_HASHCHAIN_SIZE 64
+
 #define HTREE_GET_HASHIDX(hval, hdepth) \
     (((hval) & (HTREE_HASHIDX_MASK << ((hdepth)*4))) >> ((hdepth)*4))
 

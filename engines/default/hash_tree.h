@@ -23,9 +23,7 @@
 #include <sys/types.h>
 #include <memcached/engine.h>
 
-#define HTREE_HASHTAB_SIZE       16
-#define HTREE_HASHIDX_MASK       0x0000000F
-#define HTREE_MAX_HASHCHAIN_SIZE 64
+#define HTREE_HASHTAB_SIZE 16
 
 typedef struct _htree_elem_item {
     uint16_t refcount;
