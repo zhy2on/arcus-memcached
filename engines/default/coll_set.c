@@ -131,7 +131,7 @@ static ENGINE_ERROR_CODE do_set_elem_delete_with_value(set_meta_info *info,
     if (info->root == NULL)
         return ENGINE_ELEM_ENOENT;
 
-    ssize_t space_delta = 0;
+    ssize_t space_delta;
     bool found = htree_elem_traverse_dfs_bykey((htree_node **)&info->root, info->root,
                                                vlen, (const unsigned char *)val,
                                                true, NULL,
@@ -151,7 +151,7 @@ static uint32_t do_set_elem_get(set_meta_info *info,
 {
     assert(info->root);
     uint32_t fcnt;
-    ssize_t space_delta = 0;
+    ssize_t space_delta;
 
     if (delete) {
         CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, count, ELEM_DELETE_NORMAL);
@@ -192,7 +192,7 @@ static ENGINE_ERROR_CODE do_set_elem_insert(hash_item *it, set_elem_item *elem,
 #endif
     ENGINE_ERROR_CODE ret;
 
-    ssize_t space_delta = 0;
+    ssize_t space_delta;
     ret = htree_elem_insert((htree_node **)&info->root,
                             elem,
                             false, is_sticky, real_mcnt, NULL, &space_delta, cookie);

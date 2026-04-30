@@ -297,6 +297,8 @@ ENGINE_ERROR_CODE htree_elem_update(htree_node **root_pptr,
                                     htree_elem_item **old_elem_out,
                                     ssize_t *space_delta_out)
 {
+    if (space_delta_out) *space_delta_out = 0;
+
     if (*root_pptr == NULL)
         return ENGINE_ELEM_ENOENT;
 
@@ -419,6 +421,7 @@ int htree_elem_traverse_rand(htree_node **root_pptr,
                              void *meta,
                              ssize_t *space_delta_out)
 {
+    if (space_delta_out) *space_delta_out = 0;
     int fcnt = 0;
 
     if (delete) {
@@ -545,6 +548,7 @@ bool htree_elem_traverse_dfs_bykey(htree_node **root_pptr,
                                    void *meta,
                                    ssize_t *space_delta_out)
 {
+    if (space_delta_out) *space_delta_out = 0;
     uint32_t hval = genhash_string_hash(data, nkey);
     bool found = do_htree_elem_traverse_bykey(root_pptr, node, hval, nkey, data,
                                               delete, elem_out, unlink_fn, meta,
@@ -566,6 +570,7 @@ int htree_elem_traverse_dfs_bycnt(htree_node **root_pptr,
                                   void *meta,
                                   ssize_t *space_delta_out)
 {
+    if (space_delta_out) *space_delta_out = 0;
     int hidx;
     int fcnt = 0;
 
@@ -630,6 +635,7 @@ ENGINE_ERROR_CODE htree_elem_insert(htree_node **root_pptr,
                                     ssize_t *space_delta_out,
                                     const void *cookie)
 {
+    if (space_delta_out) *space_delta_out = 0;
     bool new_root = false;
 
     elem->hval = genhash_string_hash(elem->data, elem->nkey);

@@ -129,7 +129,7 @@ static ENGINE_ERROR_CODE do_map_elem_delete_with_field(map_meta_info *info,
     if (info->root == NULL)
         return ENGINE_ELEM_ENOENT;
 
-    ssize_t space_delta = 0;
+    ssize_t space_delta;
     bool found = htree_elem_traverse_dfs_bykey((htree_node **)&info->root, info->root,
                                                field->length,
                                                (const unsigned char *)field->value,
@@ -157,7 +157,7 @@ static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
     memcpy(new_elem->data + field->length, value, nbytes);
 
     map_elem_item *old_elem = NULL;
-    ssize_t space_delta = 0;
+    ssize_t space_delta;
 #ifdef ENABLE_STICKY_ITEM
     bool is_sticky = IS_STICKY_COLLFLG(info);
 #else
@@ -196,7 +196,7 @@ static uint32_t do_map_elem_get(map_meta_info *info,
 {
     assert(info->root);
     uint32_t fcnt = 0;
-    ssize_t space_delta = 0;
+    ssize_t space_delta;
 
     if (delete) {
         CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, numfields, ELEM_DELETE_NORMAL);
@@ -241,7 +241,7 @@ static ENGINE_ERROR_CODE do_map_elem_insert(hash_item *it, map_elem_item *elem,
     bool is_sticky = false;
 #endif
     map_elem_item *old_elem = NULL;
-    ssize_t space_delta = 0;
+    ssize_t space_delta;
     ENGINE_ERROR_CODE ret;
 
     ret = htree_elem_insert((htree_node **)&info->root,
