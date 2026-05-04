@@ -196,7 +196,7 @@ static ENGINE_ERROR_CODE do_set_elem_insert(hash_item *it, set_elem_item *elem,
         return ENGINE_ELEM_EEXISTS;
 
     ssize_t space_delta;
-    ENGINE_ERROR_CODE ret = htree_elem_link((htree_node **)&info->root,
+    ENGINE_ERROR_CODE ret = htree_elem_insert((htree_node **)&info->root,
                                             (htree_elem_item *)elem,
                                             &space_delta, cookie);
     if (ret != ENGINE_SUCCESS)

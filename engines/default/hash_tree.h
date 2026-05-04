@@ -71,10 +71,10 @@ void htree_elem_replace_at(htree_node **root_pptr,
                            htree_elem_item *elem,
                            ssize_t *space_delta_out);
 
-ENGINE_ERROR_CODE htree_elem_link(htree_node **root_pptr,
-                                  htree_elem_item *elem,
-                                  ssize_t *space_delta_out,
-                                  const void *cookie);
+ENGINE_ERROR_CODE htree_elem_insert(htree_node **root_pptr,
+                                    htree_elem_item *elem,
+                                    ssize_t *space_delta_out,
+                                    const void *cookie);
 
 int htree_elem_traverse_rand(htree_node **root_pptr,
                              htree_node *node,

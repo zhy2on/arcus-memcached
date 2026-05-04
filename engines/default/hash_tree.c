@@ -241,10 +241,29 @@ void htree_elem_replace_at(htree_node **root_pptr,
     }
 }
 
-ENGINE_ERROR_CODE htree_elem_link(htree_node **root_pptr,
-                                  htree_elem_item *elem,
-                                  ssize_t *space_delta_out,
-                                  const void *cookie)
+static void do_htree_elem_link(htree_node **root_pptr,
+                               htree_node *node, const int hidx,
+                               htree_elem_item *elem)
+{
+    elem->next       = node->htab[hidx];
+    node->htab[hidx] = elem;
+    node->hcnt[hidx] += 1;
+    elem->status      = ELEM_STATUS_LINKED;
+
+    htree_node *cur = *root_pptr;
+    while (cur != node) {
+        cur->tot_elem_cnt += 1;
+        int cidx = HTREE_GET_HASHIDX(elem->hval, cur->hdepth);
+        assert(cur->hcnt[cidx] == -1);
+        cur = (htree_node *)cur->htab[cidx];
+    }
+    node->tot_elem_cnt += 1;
+}
+
+ENGINE_ERROR_CODE htree_elem_insert(htree_node **root_pptr,
+                                    htree_elem_item *elem,
+                                    ssize_t *space_delta_out,
+                                    const void *cookie)
 {
     if (space_delta_out) *space_delta_out = 0;
     bool new_root = false;
@@ -284,19 +303,7 @@ ENGINE_ERROR_CODE htree_elem_link(htree_node **root_pptr,
         node_created = true;
     }
 
-    elem->next       = node->htab[hidx];
-    node->htab[hidx] = elem;
-    node->hcnt[hidx] += 1;
-    elem->status      = ELEM_STATUS_LINKED;
-
-    htree_node *cur = *root_pptr;
-    while (cur != node) {
-        cur->tot_elem_cnt += 1;
-        int cidx = HTREE_GET_HASHIDX(elem->hval, cur->hdepth);
-        assert(cur->hcnt[cidx] == -1);
-        cur = (htree_node *)cur->htab[cidx];
-    }
-    node->tot_elem_cnt += 1;
+    do_htree_elem_link(root_pptr, node, hidx, elem);
 
     if (space_delta_out) {
         size_t new_ntotal = offsetof(htree_elem_item, data) + elem->nbytes;

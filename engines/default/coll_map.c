@@ -264,7 +264,7 @@ static ENGINE_ERROR_CODE do_map_elem_insert(hash_item *it, map_elem_item *elem,
 #endif
         if (real_mcnt > 0 && (int)info->ccnt >= real_mcnt)
             return ENGINE_EOVERFLOW;
-        ENGINE_ERROR_CODE ret = htree_elem_link((htree_node **)&info->root,
+        ENGINE_ERROR_CODE ret = htree_elem_insert((htree_node **)&info->root,
                                                (htree_elem_item *)elem,
                                                &space_delta, cookie);
         if (ret != ENGINE_SUCCESS)
