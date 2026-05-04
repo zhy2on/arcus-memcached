@@ -123,7 +123,7 @@ static void do_map_elem_unlink_clog(void *meta, htree_elem_item *elem)
     CLOG_MAP_ELEM_DELETE((map_meta_info *)meta, elem, ELEM_DELETE_NORMAL);
 }
 
-static ENGINE_ERROR_CODE do_map_elem_delete_with_field(map_meta_info *info,
+static ENGINE_ERROR_CODE do_map_elem_delete_by_field(map_meta_info *info,
                                                        const field_t *field)
 {
     if (info->root == NULL)
@@ -200,7 +200,7 @@ static uint32_t do_map_elem_traverse_all(map_meta_info *info,
         CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, 0, ELEM_DELETE_NORMAL);
     }
     htree_elem_unlink_func fn = delete ? do_map_elem_unlink_clog : NULL;
-    uint32_t fcnt = htree_elem_traverse_dfs_bycnt((htree_node **)&info->root, info->root,
+    uint32_t fcnt = htree_elem_traverse_dfs_by_cnt((htree_node **)&info->root, info->root,
                                                   0, delete, (htree_elem_item **)elem_array,
                                                   fn, info,
                                                   fn ? &space_delta : NULL);
@@ -212,7 +212,7 @@ static uint32_t do_map_elem_traverse_all(map_meta_info *info,
     return fcnt;
 }
 
-static uint32_t do_map_elem_traverse_byfield(map_meta_info *info,
+static uint32_t do_map_elem_traverse_by_field(map_meta_info *info,
                                              const int numfields, const field_t *flist,
                                              const bool delete, map_elem_item **elem_array)
 {
@@ -472,7 +472,7 @@ ENGINE_ERROR_CODE map_elem_delete(const char *key, const uint32_t nkey,
             if (numfields == 0)
                 *del_count = do_map_elem_traverse_all(info, true /* delete */, NULL);
             else
-                *del_count = do_map_elem_traverse_byfield(info, numfields, flist, true /* delete */, NULL);
+                *del_count = do_map_elem_traverse_by_field(info, numfields, flist, true /* delete */, NULL);
         }
         if (*del_count > 0) {
             if (info->ccnt == 0 && drop_if_empty) {
@@ -527,7 +527,7 @@ ENGINE_ERROR_CODE map_elem_get(const char *key, const uint32_t nkey,
                 eresult->elem_count = do_map_elem_traverse_all(info, delete,
                                                           (map_elem_item **)eresult->elem_array);
             else
-                eresult->elem_count = do_map_elem_traverse_byfield(info, numfields, flist, delete,
+                eresult->elem_count = do_map_elem_traverse_by_field(info, numfields, flist, delete,
                                                               (map_elem_item **)eresult->elem_array);
             if (eresult->elem_count > 0) {
                 if (info->ccnt == 0 && drop_if_empty) {
@@ -558,7 +558,7 @@ uint32_t map_elem_delete_with_count(map_meta_info *info, const uint32_t count)
 {
     uint32_t fcnt = 0;
     if (info->root != NULL) {
-        fcnt = htree_elem_traverse_dfs_bycnt((htree_node **)&info->root, info->root,
+        fcnt = htree_elem_traverse_dfs_by_cnt((htree_node **)&info->root, info->root,
                                              count, true, NULL, NULL, NULL, NULL);
     }
     return fcnt;
@@ -571,7 +571,7 @@ uint32_t map_elem_delete_with_count(map_meta_info *info, const uint32_t count)
 void map_elem_get_all(map_meta_info *info, elems_result_t *eresult)
 {
     assert(eresult->elem_arrsz >= info->ccnt && eresult->elem_count == 0);
-    eresult->elem_count = htree_elem_traverse_dfs_bycnt((htree_node **)&info->root, info->root,
+    eresult->elem_count = htree_elem_traverse_dfs_by_cnt((htree_node **)&info->root, info->root,
                                                         0, false,
                                                         (htree_elem_item **)eresult->elem_array,
                                                         NULL, NULL, NULL);
@@ -757,7 +757,7 @@ ENGINE_ERROR_CODE map_apply_elem_delete(void *engine, hash_item *it,
             ret = ENGINE_ELEM_ENOENT; break;
         }
 
-        if (do_map_elem_delete_with_field(info, &flist) == ENGINE_SUCCESS)
+        if (do_map_elem_delete_by_field(info, &flist) == ENGINE_SUCCESS)
             ndeleted = 1;
         if (ndeleted == 0) {
             logger->log(EXTENSION_LOG_INFO, NULL, "map_apply_elem_delete failed."

@@ -532,7 +532,7 @@ bool htree_elem_delete(htree_node **root_pptr,
     return true;
 }
 
-int htree_elem_traverse_dfs_bycnt(htree_node **root_pptr,
+int htree_elem_traverse_dfs_by_cnt(htree_node **root_pptr,
                                   htree_node *node,
                                   uint32_t count,
                                   bool delete,
@@ -549,7 +549,7 @@ int htree_elem_traverse_dfs_bycnt(htree_node **root_pptr,
         if (node->hcnt[hidx] == -1) {
             htree_node *child_node = (htree_node *)node->htab[hidx];
             uint32_t rcnt = (count > 0 ? (count - (uint32_t)fcnt) : 0);
-            int ecnt = htree_elem_traverse_dfs_bycnt(root_pptr, child_node, rcnt, delete,
+            int ecnt = htree_elem_traverse_dfs_by_cnt(root_pptr, child_node, rcnt, delete,
                                                      (elem_array == NULL ? NULL : &elem_array[fcnt]),
                                                      unlink_fn, meta, space_delta_out);
             fcnt += ecnt;

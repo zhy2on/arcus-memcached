@@ -90,7 +90,7 @@ int htree_elem_traverse_rand(htree_node **root_pptr,
                              void *meta,
                              ssize_t *space_delta_out);
 
-int htree_elem_traverse_dfs_bycnt(htree_node **root_pptr,
+int htree_elem_traverse_dfs_by_cnt(htree_node **root_pptr,
                                   htree_node *node,
                                   uint32_t count,
                                   bool delete,

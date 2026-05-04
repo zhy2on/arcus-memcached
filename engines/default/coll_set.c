@@ -123,7 +123,7 @@ static void do_set_elem_unlink_clog(void *meta, htree_elem_item *elem)
     CLOG_SET_ELEM_DELETE((set_meta_info *)meta, elem, ELEM_DELETE_NORMAL);
 }
 
-static ENGINE_ERROR_CODE do_set_elem_delete_with_value(set_meta_info *info,
+static ENGINE_ERROR_CODE do_set_elem_delete_by_value(set_meta_info *info,
                                                        const char *val, const int vlen,
                                                        enum elem_delete_cause cause)
 {
@@ -159,7 +159,7 @@ static uint32_t do_set_elem_get(set_meta_info *info,
     }
     if (count >= info->ccnt || count == 0) { /* Return all */
         htree_elem_unlink_func fn = delete ? do_set_elem_unlink_clog : NULL;
-        fcnt = htree_elem_traverse_dfs_bycnt((htree_node **)&info->root, info->root,
+        fcnt = htree_elem_traverse_dfs_by_cnt((htree_node **)&info->root, info->root,
                                              count, delete,
                                              (htree_elem_item **)elem_array,
                                              fn, info,
@@ -321,7 +321,7 @@ ENGINE_ERROR_CODE set_elem_delete(const char *key, const uint32_t nkey,
     ret = do_set_item_find(key, nkey, DONT_UPDATE, &it);
     if (ret == ENGINE_SUCCESS) { /* it != NULL */
         set_meta_info *info = (set_meta_info *)item_get_meta(it);
-        ret = do_set_elem_delete_with_value(info, value, nbytes, ELEM_DELETE_NORMAL);
+        ret = do_set_elem_delete_by_value(info, value, nbytes, ELEM_DELETE_NORMAL);
         if (ret == ENGINE_SUCCESS) {
             if (info->ccnt == 0 && drop_if_empty) {
                 do_item_unlink(it, ITEM_UNLINK_NORMAL);
@@ -424,7 +424,7 @@ uint32_t set_elem_delete_with_count(set_meta_info *info, const uint32_t count)
 {
     uint32_t fcnt = 0;
     if (info->root != NULL) {
-        fcnt = htree_elem_traverse_dfs_bycnt((htree_node **)&info->root, info->root,
+        fcnt = htree_elem_traverse_dfs_by_cnt((htree_node **)&info->root, info->root,
                                              count, true, NULL, NULL, NULL, NULL);
     }
     return fcnt;
@@ -433,7 +433,7 @@ uint32_t set_elem_delete_with_count(set_meta_info *info, const uint32_t count)
 void set_elem_get_all(set_meta_info *info, elems_result_t *eresult)
 {
     assert(eresult->elem_arrsz >= info->ccnt && eresult->elem_count == 0);
-    eresult->elem_count = htree_elem_traverse_dfs_bycnt((htree_node **)&info->root, info->root,
+    eresult->elem_count = htree_elem_traverse_dfs_by_cnt((htree_node **)&info->root, info->root,
                                                         0, false,
                                                         (htree_elem_item **)eresult->elem_array,
                                                         NULL, NULL, NULL);
@@ -604,7 +604,7 @@ ENGINE_ERROR_CODE set_apply_elem_delete(void *engine, hash_item *it,
         }
 
         info = (set_meta_info *)item_get_meta(it);
-        ret = do_set_elem_delete_with_value(info, value, nbytes, ELEM_DELETE_NORMAL);
+        ret = do_set_elem_delete_by_value(info, value, nbytes, ELEM_DELETE_NORMAL);
         if (ret == ENGINE_ELEM_ENOENT) {
             logger->log(EXTENSION_LOG_INFO, NULL, "set_apply_elem_delete failed."
                         " no element deleted. key=%.*s nkey=%u\n",
