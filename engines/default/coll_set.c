@@ -192,8 +192,6 @@ static ENGINE_ERROR_CODE do_set_elem_insert(hash_item *it, set_elem_item *elem,
 #endif
     if (real_mcnt > 0 && (int)info->ccnt >= real_mcnt)
         return ENGINE_EOVERFLOW;
-    if (htree_elem_find((htree_node *)info->root, elem->nkey, elem->data, NULL))
-        return ENGINE_ELEM_EEXISTS;
 
     ssize_t space_delta;
     ENGINE_ERROR_CODE ret = htree_elem_insert((htree_node **)&info->root,

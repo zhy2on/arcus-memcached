@@ -270,6 +270,7 @@ ENGINE_ERROR_CODE htree_elem_insert(htree_node **root_pptr,
 
     elem->hval = genhash_string_hash(elem->data, elem->nkey);
 
+    /* allocate root node if the tree is empty */
     if (*root_pptr == NULL) {
         htree_node *root = do_htree_node_alloc(0, cookie);
         if (root == NULL)
@@ -278,6 +279,7 @@ ENGINE_ERROR_CODE htree_elem_insert(htree_node **root_pptr,
         new_root = true;
     }
 
+    /* traverse to the leaf node that should contain this element */
     htree_node *node = *root_pptr;
     int hidx;
     while (true) {
@@ -287,6 +289,20 @@ ENGINE_ERROR_CODE htree_elem_insert(htree_node **root_pptr,
         node = (htree_node *)node->htab[hidx];
     }
 
+    /* check for duplicate key in the hash chain */
+    for (htree_elem_item *find = (htree_elem_item *)node->htab[hidx];
+         find != NULL; find = find->next) {
+        if (find->hval == elem->hval && find->nkey == elem->nkey &&
+            memcmp(find->data, elem->data, elem->nkey) == 0) {
+            if (new_root) {
+                do_htree_node_free(*root_pptr);
+                *root_pptr = NULL;
+            }
+            return ENGINE_ELEM_EEXISTS;
+        }
+    }
+
+    /* split the hash chain into a new child node if it is full */
     bool node_created = new_root;
     if (node->hcnt[hidx] >= HTREE_MAX_HASHCHAIN_SIZE) {
         htree_node *n_node = do_htree_node_alloc(node->hdepth + 1, cookie);
