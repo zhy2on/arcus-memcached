@@ -319,6 +319,15 @@ void do_coll_space_incr(coll_meta_info *info, ENGINE_ITEM_TYPE item_type,
 void do_coll_space_decr(coll_meta_info *info, ENGINE_ITEM_TYPE item_type,
                         const size_t nspace);
 
+static inline void do_coll_space_update(coll_meta_info *info, ENGINE_ITEM_TYPE type,
+                                        ssize_t space_delta)
+{
+    if (space_delta > 0)
+        do_coll_space_incr(info, type, (size_t)space_delta);
+    else if (space_delta < 0)
+        do_coll_space_decr(info, type, (size_t)-space_delta);
+}
+
 /* item functions */
 bool do_item_isvalid(hash_item *it, rel_time_t current_time);
 

@@ -228,8 +228,7 @@ bool htree_elem_find(htree_node *root,
 
 void htree_elem_replace_at(htree_node **root_pptr,
                            htree_find_result *result,
-                           htree_elem_item *elem,
-                           ssize_t *space_delta_out)
+                           htree_elem_item *elem)
 {
     htree_elem_item *find = result->elem;
 
@@ -241,13 +240,6 @@ void htree_elem_replace_at(htree_node **root_pptr,
         result->node->htab[result->hidx] = elem;
     elem->status  = ELEM_STATUS_LINKED;
     find->status  = ELEM_STATUS_UNLINKED;
-
-    if (space_delta_out) {
-        size_t new_ntotal = offsetof(htree_elem_item, data) + elem->nbytes;
-        size_t old_ntotal = offsetof(htree_elem_item, data) + find->nbytes;
-        *space_delta_out = (ssize_t)slabs_space_size(new_ntotal)
-                         - (ssize_t)slabs_space_size(old_ntotal);
-    }
 }
 
 static void do_htree_elem_link(htree_node **root_pptr,

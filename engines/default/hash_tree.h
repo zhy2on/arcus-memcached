@@ -68,8 +68,7 @@ bool htree_elem_find(htree_node *root,
 
 void htree_elem_replace_at(htree_node **root_pptr,
                            htree_find_result *result,
-                           htree_elem_item *elem,
-                           ssize_t *space_delta_out);
+                           htree_elem_item *elem);
 
 ENGINE_ERROR_CODE htree_elem_insert(htree_node **root_pptr,
                                     htree_elem_item *elem,

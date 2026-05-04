@@ -142,8 +142,7 @@ static ENGINE_ERROR_CODE do_set_elem_delete_with_value(set_meta_info *info,
     CLOG_SET_ELEM_DELETE(info, elem, cause);
     htree_elem_release((htree_elem_item *)elem);
     info->ccnt--;
-    if (space_delta != 0)
-        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_SET, (size_t)-space_delta);
+    do_coll_space_update((coll_meta_info *)info, ITEM_TYPE_SET, space_delta);
     return ENGINE_SUCCESS;
 }
 
@@ -175,8 +174,7 @@ static uint32_t do_set_elem_get(set_meta_info *info,
     }
     if (delete) {
         info->ccnt -= fcnt;
-        if (space_delta != 0)
-            do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_SET, (size_t)-space_delta);
+        do_coll_space_update((coll_meta_info *)info, ITEM_TYPE_SET, space_delta);
         CLOG_ELEM_DELETE_END((coll_meta_info*)info, ELEM_DELETE_NORMAL);
     }
     return fcnt;
@@ -203,7 +201,7 @@ static ENGINE_ERROR_CODE do_set_elem_insert(hash_item *it, set_elem_item *elem,
         return ret;
 
     info->ccnt++;
-    do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_SET, (size_t)space_delta);
+    do_coll_space_update((coll_meta_info *)info, ITEM_TYPE_SET, space_delta);
     CLOG_SET_ELEM_INSERT(info, elem);
     return ENGINE_SUCCESS;
 }

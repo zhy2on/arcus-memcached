@@ -141,8 +141,7 @@ static ENGINE_ERROR_CODE do_map_elem_delete_with_field(map_meta_info *info,
     CLOG_MAP_ELEM_DELETE(info, elem, ELEM_DELETE_NORMAL);
     htree_elem_release((htree_elem_item *)elem);
     info->ccnt--;
-    if (space_delta != 0)
-        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);
+    do_coll_space_update((coll_meta_info *)info, ITEM_TYPE_MAP, space_delta);
     return ENGINE_SUCCESS;
 }
 
@@ -178,16 +177,15 @@ static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
     memcpy(new_elem->data, field->value, field->length);
     memcpy(new_elem->data + field->length, value, nbytes);
 
-    ssize_t space_delta;
     htree_elem_replace_at((htree_node **)&info->root, &find_result,
-                          (htree_elem_item *)new_elem, &space_delta);
+                          (htree_elem_item *)new_elem);
     CLOG_MAP_ELEM_INSERT(info, find, new_elem);
     if (find->refcount == 0)
         htree_elem_free((htree_elem_item *)find);
-    if (space_delta > 0)
-        do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)space_delta);
-    else if (space_delta < 0)
-        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);
+
+    ssize_t space_delta = (ssize_t)slabs_space_size(offsetof(htree_elem_item, data) + new_elem->nbytes)
+                        - (ssize_t)slabs_space_size(offsetof(htree_elem_item, data) + find->nbytes);
+    do_coll_space_update((coll_meta_info *)info, ITEM_TYPE_MAP, space_delta);
 
     return ENGINE_SUCCESS;
 }
@@ -224,8 +222,7 @@ static uint32_t do_map_elem_get(map_meta_info *info,
     }
     if (delete) {
         info->ccnt -= fcnt;
-        if (space_delta != 0)
-            do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);
+        do_coll_space_update((coll_meta_info *)info, ITEM_TYPE_MAP, space_delta);
         CLOG_ELEM_DELETE_END((coll_meta_info*)info, ELEM_DELETE_NORMAL);
     }
     return fcnt;
@@ -237,25 +234,22 @@ static ENGINE_ERROR_CODE do_map_elem_replace(map_meta_info *info,
                                              map_elem_item *elem,
                                              bool *replaced)
 {
-    ssize_t space_delta;
-
 #ifdef ENABLE_STICKY_ITEM
     if (IS_STICKY_COLLFLG(info) && (size_t)old_elem->nbytes < (size_t)elem->nbytes
         && do_item_sticky_overflowed())
         return ENGINE_ENOMEM;
 #endif
     htree_elem_replace_at((htree_node **)&info->root, find_result,
-                          (htree_elem_item *)elem, &space_delta);
+                          (htree_elem_item *)elem);
     CLOG_MAP_ELEM_INSERT(info, old_elem, elem);
 
     if (old_elem->refcount == 0)
         htree_elem_free(old_elem);
     if (replaced) *replaced = true;
 
-    if (space_delta > 0)
-        do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)space_delta);
-    else if (space_delta < 0)
-        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);
+    ssize_t space_delta = (ssize_t)slabs_space_size(offsetof(htree_elem_item, data) + elem->nbytes)
+                        - (ssize_t)slabs_space_size(offsetof(htree_elem_item, data) + old_elem->nbytes);
+    do_coll_space_update((coll_meta_info *)info, ITEM_TYPE_MAP, space_delta);
 
     return ENGINE_SUCCESS;
 }
@@ -281,7 +275,7 @@ static ENGINE_ERROR_CODE do_map_elem_add(map_meta_info *info, map_elem_item *ele
 
     CLOG_MAP_ELEM_INSERT(info, NULL, elem);
     info->ccnt++;
-    do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)space_delta);
+    do_coll_space_update((coll_meta_info *)info, ITEM_TYPE_MAP, space_delta);
 
     return ENGINE_SUCCESS;
 }
