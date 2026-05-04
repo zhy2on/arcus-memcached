@@ -185,17 +185,20 @@ static ENGINE_ERROR_CODE do_set_elem_insert(hash_item *it, set_elem_item *elem,
 {
     set_meta_info *info = (set_meta_info *)item_get_meta(it);
     int real_mcnt = (int)(info->mcnt > 0 ? info->mcnt : config->max_set_size);
+
 #ifdef ENABLE_STICKY_ITEM
-    bool is_sticky = IS_STICKY_EXPTIME(it->exptime);
-#else
-    bool is_sticky = false;
+    if (IS_STICKY_EXPTIME(it->exptime) && do_item_sticky_overflowed())
+        return ENGINE_ENOMEM;
 #endif
-    ENGINE_ERROR_CODE ret;
+    if (real_mcnt > 0 && (int)info->ccnt >= real_mcnt)
+        return ENGINE_EOVERFLOW;
+    if (htree_elem_find((htree_node *)info->root, elem->nkey, elem->data, NULL))
+        return ENGINE_ELEM_EEXISTS;
 
     ssize_t space_delta;
-    ret = htree_elem_insert((htree_node **)&info->root,
-                            elem,
-                            false, is_sticky, real_mcnt, NULL, &space_delta, cookie);
+    ENGINE_ERROR_CODE ret = htree_elem_link((htree_node **)&info->root,
+                                            (htree_elem_item *)elem,
+                                            &space_delta, cookie);
     if (ret != ENGINE_SUCCESS)
         return ret;
 

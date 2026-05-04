@@ -47,6 +47,13 @@ typedef struct _htree_node {
 
 typedef void (*htree_elem_unlink_func)(void *meta, htree_elem_item *elem);
 
+typedef struct {
+    htree_node      *node;
+    int              hidx;
+    htree_elem_item *prev;
+    htree_elem_item *elem;
+} htree_find_result;
+
 htree_elem_item *htree_elem_alloc(uint16_t nkey, uint16_t nbytes, const void *cookie);
 
 void htree_elem_free(htree_elem_item *elem);
@@ -55,20 +62,19 @@ void htree_elem_release(htree_elem_item *elem);
 
 uint32_t htree_elem_ntotal(htree_elem_item *elem);
 
-ENGINE_ERROR_CODE htree_elem_update(htree_node **root_pptr,
-                                    htree_elem_item *elem,
-                                    bool is_sticky,
-                                    htree_elem_item **old_elem_out,
-                                    ssize_t *space_delta_out);
+bool htree_elem_find(htree_node *root,
+                     uint16_t nkey, const unsigned char *data,
+                     htree_find_result *result_out);
 
-ENGINE_ERROR_CODE htree_elem_insert(htree_node **root_pptr,
-                                    htree_elem_item *elem,
-                                    bool replace_if_exist,
-                                    bool is_sticky,
-                                    int max_count,
-                                    htree_elem_item **old_elem_out,
-                                    ssize_t *space_delta_out,
-                                    const void *cookie);
+void htree_elem_replace_at(htree_node **root_pptr,
+                           htree_find_result *result,
+                           htree_elem_item *elem,
+                           ssize_t *space_delta_out);
+
+ENGINE_ERROR_CODE htree_elem_link(htree_node **root_pptr,
+                                  htree_elem_item *elem,
+                                  ssize_t *space_delta_out,
+                                  const void *cookie);
 
 int htree_elem_traverse_rand(htree_node **root_pptr,
                              htree_node *node,

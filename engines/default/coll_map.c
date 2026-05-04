@@ -148,44 +148,44 @@ static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
                                             const field_t *field, const char *value,
                                             const uint32_t nbytes, const void *cookie)
 {
+    htree_find_result find_result;
+    if (!htree_elem_find((htree_node *)info->root,
+                         field->length, (const unsigned char *)field->value,
+                         &find_result))
+        return ENGINE_ELEM_ENOENT;
+
+    map_elem_item *find = (map_elem_item *)find_result.elem;
     uint16_t new_nbytes = (uint16_t)(field->length + nbytes);
+#ifdef ENABLE_STICKY_ITEM
+    if (IS_STICKY_COLLFLG(info) && (size_t)find->nbytes < (size_t)new_nbytes
+        && do_item_sticky_overflowed())
+        return ENGINE_ENOMEM;
+#endif
+
+    /* in-place: same size, overwrite value without alloc */
+    if (find->refcount == 0 && find->nbytes == new_nbytes) {
+        memcpy(find->data + field->length, value, nbytes);
+        CLOG_MAP_ELEM_INSERT(info, find, find);
+        return ENGINE_SUCCESS;
+    }
+
+    /* chain-replace: different size or elem in use */
     map_elem_item *new_elem = htree_elem_alloc(field->length, new_nbytes, cookie);
     if (new_elem == NULL)
         return ENGINE_ENOMEM;
-
     memcpy(new_elem->data, field->value, field->length);
     memcpy(new_elem->data + field->length, value, nbytes);
 
-    map_elem_item *old_elem = NULL;
     ssize_t space_delta;
-#ifdef ENABLE_STICKY_ITEM
-    bool is_sticky = IS_STICKY_COLLFLG(info);
-#else
-    bool is_sticky = false;
-#endif
-    ENGINE_ERROR_CODE ret = htree_elem_update((htree_node **)&info->root,
-                                              new_elem,
-                                              is_sticky,
-                                              &old_elem, &space_delta);
-    if (ret != ENGINE_SUCCESS) {
-        htree_elem_free(new_elem);
-        return ret;
-    }
-
-    if (old_elem->status == ELEM_STATUS_LINKED) {
-        /* in-place path: data overwritten in place, new_elem not linked */
-        CLOG_MAP_ELEM_INSERT(info, old_elem, old_elem);
-        htree_elem_free(new_elem);
-    } else {
-        /* chain-replace path: old elem unlinked, new_elem now linked */
-        CLOG_MAP_ELEM_INSERT(info, old_elem, new_elem);
-        if (old_elem->refcount == 0)
-            htree_elem_free(old_elem);
-        if (space_delta > 0)
-            do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)space_delta);
-        else if (space_delta < 0)
-            do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);
-    }
+    htree_elem_replace_at((htree_node **)&info->root, &find_result,
+                          (htree_elem_item *)new_elem, &space_delta);
+    CLOG_MAP_ELEM_INSERT(info, find, new_elem);
+    if (find->refcount == 0)
+        htree_elem_free((htree_elem_item *)find);
+    if (space_delta > 0)
+        do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)space_delta);
+    else if (space_delta < 0)
+        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);
 
     return ENGINE_SUCCESS;
 }
@@ -235,26 +235,20 @@ static ENGINE_ERROR_CODE do_map_elem_insert(hash_item *it, map_elem_item *elem,
 {
     map_meta_info *info = (map_meta_info *)item_get_meta(it);
     int real_mcnt = (int)(info->mcnt > 0 ? info->mcnt : config->max_map_size);
-#ifdef ENABLE_STICKY_ITEM
-    bool is_sticky = IS_STICKY_COLLFLG(info);
-#else
-    bool is_sticky = false;
-#endif
-    map_elem_item *old_elem = NULL;
     ssize_t space_delta;
-    ENGINE_ERROR_CODE ret;
 
-    ret = htree_elem_insert((htree_node **)&info->root,
-                            elem,
-                            replace_if_exist,
-                            is_sticky, real_mcnt,
-                            &old_elem,
-                            &space_delta, cookie);
-    if (ret != ENGINE_SUCCESS)
-        return ret;
-
-    if (old_elem != NULL) {
-        /* replace path */
+    htree_find_result find_result;
+    if (htree_elem_find((htree_node *)info->root, elem->nkey, elem->data, &find_result)) {
+        if (!replace_if_exist)
+            return ENGINE_ELEM_EEXISTS;
+        map_elem_item *old_elem = (map_elem_item *)find_result.elem;
+#ifdef ENABLE_STICKY_ITEM
+        if (IS_STICKY_COLLFLG(info) && (size_t)old_elem->nbytes < (size_t)elem->nbytes
+            && do_item_sticky_overflowed())
+            return ENGINE_ENOMEM;
+#endif
+        htree_elem_replace_at((htree_node **)&info->root, &find_result,
+                              (htree_elem_item *)elem, &space_delta);
         CLOG_MAP_ELEM_INSERT(info, old_elem, elem);
         if (old_elem->refcount == 0)
             htree_elem_free(old_elem);
@@ -264,7 +258,17 @@ static ENGINE_ERROR_CODE do_map_elem_insert(hash_item *it, map_elem_item *elem,
         else if (space_delta < 0)
             do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);
     } else {
-        /* new insert path */
+#ifdef ENABLE_STICKY_ITEM
+        if (IS_STICKY_COLLFLG(info) && do_item_sticky_overflowed())
+            return ENGINE_ENOMEM;
+#endif
+        if (real_mcnt > 0 && (int)info->ccnt >= real_mcnt)
+            return ENGINE_EOVERFLOW;
+        ENGINE_ERROR_CODE ret = htree_elem_link((htree_node **)&info->root,
+                                               (htree_elem_item *)elem,
+                                               &space_delta, cookie);
+        if (ret != ENGINE_SUCCESS)
+            return ret;
         CLOG_MAP_ELEM_INSERT(info, NULL, elem);
         info->ccnt++;
         do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)space_delta);
