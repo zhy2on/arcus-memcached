@@ -190,34 +190,65 @@ static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
     return ENGINE_SUCCESS;
 }
 
-static uint32_t do_map_elem_get(map_meta_info *info,
-                                const int numfields, const field_t *flist,
-                                const bool delete, map_elem_item **elem_array)
+static uint32_t do_map_elem_traverse_all(map_meta_info *info,
+                                         const bool delete, map_elem_item **elem_array)
 {
     assert(info->root);
+    ssize_t space_delta = 0;
+
+    if (delete) {
+        CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, 0, ELEM_DELETE_NORMAL);
+    }
+    htree_elem_unlink_func fn = delete ? do_map_elem_unlink_clog : NULL;
+    uint32_t fcnt = htree_elem_traverse_dfs_bycnt((htree_node **)&info->root, info->root,
+                                                  0, delete, (htree_elem_item **)elem_array,
+                                                  fn, info,
+                                                  fn ? &space_delta : NULL);
+    if (delete) {
+        info->ccnt -= fcnt;
+        do_coll_space_update((coll_meta_info *)info, ITEM_TYPE_MAP, space_delta);
+        CLOG_ELEM_DELETE_END((coll_meta_info*)info, ELEM_DELETE_NORMAL);
+    }
+    return fcnt;
+}
+
+static uint32_t do_map_elem_traverse_byfield(map_meta_info *info,
+                                             const int numfields, const field_t *flist,
+                                             const bool delete, map_elem_item **elem_array)
+{
+    assert(info->root && numfields > 0);
     uint32_t fcnt = 0;
-    ssize_t space_delta;
+    ssize_t space_delta = 0;
 
     if (delete) {
         CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, numfields, ELEM_DELETE_NORMAL);
     }
-    if (numfields == 0) {
-        htree_elem_unlink_func fn = delete ? do_map_elem_unlink_clog : NULL;
-        fcnt = htree_elem_traverse_dfs_bycnt((htree_node **)&info->root, info->root,
-                                             0, delete, (htree_elem_item **)elem_array,
-                                             fn, info,
-                                             fn ? &space_delta : NULL);
-    } else {
-        for (int ii = 0; ii < numfields; ii++) {
-            map_elem_item **elem_out = (elem_array != NULL) ? &elem_array[fcnt] : NULL;
-            bool found = htree_elem_traverse_dfs_bykey((htree_node **)&info->root, info->root,
-                                                       flist[ii].length,
-                                                       (const unsigned char *)flist[ii].value,
-                                                       delete, (htree_elem_item **)elem_out,
-                                                       delete ? do_map_elem_unlink_clog : NULL,
-                                                       info,
-                                                       delete ? &space_delta : NULL);
-            if (found) fcnt++;
+    for (int ii = 0; ii < numfields; ii++) {
+        if (delete) {
+            map_elem_item *elem;
+            ssize_t delta;
+            bool deleted = htree_elem_delete((htree_node **)&info->root,
+                                             flist[ii].length,
+                                             (const unsigned char *)flist[ii].value,
+                                             (htree_elem_item **)&elem, &delta);
+            if (!deleted) continue;
+            CLOG_MAP_ELEM_DELETE(info, elem, ELEM_DELETE_NORMAL);
+            if (elem_array != NULL) elem_array[fcnt] = elem;
+            else htree_elem_release((htree_elem_item *)elem);
+            space_delta += delta;
+            fcnt++;
+        } else {
+            htree_find_result result;
+            bool found = htree_elem_find((htree_node *)info->root,
+                                         flist[ii].length,
+                                         (const unsigned char *)flist[ii].value,
+                                         &result);
+            if (!found) continue;
+            if (elem_array != NULL) {
+                result.elem->refcount++;
+                elem_array[fcnt] = (map_elem_item *)result.elem;
+            }
+            fcnt++;
         }
     }
     if (delete) {
@@ -437,8 +468,12 @@ ENGINE_ERROR_CODE map_elem_delete(const char *key, const uint32_t nkey,
     ret = do_map_item_find(key, nkey, DONT_UPDATE, &it);
     if (ret == ENGINE_SUCCESS) { /* it != NULL */
         map_meta_info *info = (map_meta_info *)item_get_meta(it);
-        if (info->root != NULL)
-            *del_count = do_map_elem_get(info, numfields, flist, true, NULL);
+        if (info->root != NULL) {
+            if (numfields == 0)
+                *del_count = do_map_elem_traverse_all(info, true /* delete */, NULL);
+            else
+                *del_count = do_map_elem_traverse_byfield(info, numfields, flist, true /* delete */, NULL);
+        }
         if (*del_count > 0) {
             if (info->ccnt == 0 && drop_if_empty) {
                 assert(info->root == NULL);
@@ -488,8 +523,12 @@ ENGINE_ERROR_CODE map_elem_get(const char *key, const uint32_t nkey,
             if (eresult->elem_array == NULL) {
                 ret = ENGINE_ENOMEM; break;
             }
-            eresult->elem_count = do_map_elem_get(info, numfields, flist, delete,
-                                                  (map_elem_item **)eresult->elem_array);
+            if (numfields == 0)
+                eresult->elem_count = do_map_elem_traverse_all(info, delete,
+                                                          (map_elem_item **)eresult->elem_array);
+            else
+                eresult->elem_count = do_map_elem_traverse_byfield(info, numfields, flist, delete,
+                                                              (map_elem_item **)eresult->elem_array);
             if (eresult->elem_count > 0) {
                 if (info->ccnt == 0 && drop_if_empty) {
                     assert(delete == true);

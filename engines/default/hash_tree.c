@@ -481,64 +481,6 @@ int htree_elem_traverse_rand(htree_node **root_pptr,
     return fcnt;
 }
 
-static bool do_htree_elem_traverse_bykey(htree_node **root_pptr,
-                                         htree_node *node,
-                                         uint32_t hval,
-                                         uint16_t nkey,
-                                         const unsigned char *data,
-                                         bool delete,
-                                         htree_elem_item **elem_out,
-                                         htree_elem_unlink_func unlink_fn,
-                                         void *meta,
-                                         ssize_t *space_delta_out)
-{
-    int hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
-
-    if (node->hcnt[hidx] == -1) {
-        htree_node *child_node = (htree_node *)node->htab[hidx];
-        bool found = do_htree_elem_traverse_bykey(root_pptr, child_node,
-                                                  hval, nkey, data, delete,
-                                                  elem_out, unlink_fn, meta,
-                                                  space_delta_out);
-        if (found && delete) {
-            if (is_leaf_node(child_node) &&
-                child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE / 2)) {
-                do_htree_node_unlink(root_pptr, node, hidx);
-                space_delta_add(space_delta_out, -(ssize_t)slabs_space_size(sizeof(htree_node)));
-            }
-            node->tot_elem_cnt -= 1;
-        }
-        return found;
-    }
-
-    if (node->hcnt[hidx] > 0) {
-        htree_elem_item *prev = NULL;
-        htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
-        while (elem != NULL) {
-            if (elem->hval == hval && elem->nkey == nkey &&
-                memcmp(elem->data, data, nkey) == 0) {
-                if (elem_out) {
-                    elem->refcount++;
-                    *elem_out = elem;
-                }
-                if (delete) {
-                    do_htree_elem_unlink(root_pptr, node, hidx, prev, elem);
-                    space_delta_add(space_delta_out, -(ssize_t)slabs_space_size(
-                                        offsetof(htree_elem_item, data) + elem->nbytes));
-                    if (unlink_fn != NULL)
-                        unlink_fn(meta, elem);
-                    if (elem->refcount == 0)
-                        htree_elem_free(elem);
-                }
-                return true;
-            }
-            prev = elem;
-            elem = elem->next;
-        }
-    }
-    return false;
-}
-
 bool htree_elem_delete(htree_node **root_pptr,
                        uint16_t nkey, const unsigned char *data,
                        htree_elem_item **elem_out,
@@ -588,28 +530,6 @@ bool htree_elem_delete(htree_node **root_pptr,
         space_delta_add(space_delta_out, -(ssize_t)slabs_space_size(sizeof(htree_node)));
     }
     return true;
-}
-
-bool htree_elem_traverse_dfs_bykey(htree_node **root_pptr,
-                                   htree_node *node,
-                                   uint16_t nkey,
-                                   const unsigned char *data,
-                                   bool delete,
-                                   htree_elem_item **elem_out,
-                                   htree_elem_unlink_func unlink_fn,
-                                   void *meta,
-                                   ssize_t *space_delta_out)
-{
-    if (space_delta_out) *space_delta_out = 0;
-    uint32_t hval = genhash_string_hash(data, nkey);
-    bool found = do_htree_elem_traverse_bykey(root_pptr, node, hval, nkey, data,
-                                              delete, elem_out, unlink_fn, meta,
-                                              space_delta_out);
-    if (found && delete && *root_pptr != NULL && (*root_pptr)->tot_elem_cnt == 0) {
-        do_htree_node_unlink(root_pptr, NULL, 0);
-        space_delta_add(space_delta_out, -(ssize_t)slabs_space_size(sizeof(htree_node)));
-    }
-    return found;
 }
 
 int htree_elem_traverse_dfs_bycnt(htree_node **root_pptr,
