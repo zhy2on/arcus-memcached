@@ -229,52 +229,77 @@ static uint32_t do_map_elem_get(map_meta_info *info,
     return fcnt;
 }
 
+static ENGINE_ERROR_CODE do_map_elem_replace(map_meta_info *info,
+                                             htree_find_result *find_result,
+                                             map_elem_item *old_elem,
+                                             map_elem_item *elem,
+                                             bool *replaced)
+{
+    ssize_t space_delta;
+
+#ifdef ENABLE_STICKY_ITEM
+    if (IS_STICKY_COLLFLG(info) && (size_t)old_elem->nbytes < (size_t)elem->nbytes
+        && do_item_sticky_overflowed())
+        return ENGINE_ENOMEM;
+#endif
+    htree_elem_replace_at((htree_node **)&info->root, find_result,
+                          (htree_elem_item *)elem, &space_delta);
+    CLOG_MAP_ELEM_INSERT(info, old_elem, elem);
+
+    if (old_elem->refcount == 0)
+        htree_elem_free(old_elem);
+    if (replaced) *replaced = true;
+
+    if (space_delta > 0)
+        do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)space_delta);
+    else if (space_delta < 0)
+        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);
+
+    return ENGINE_SUCCESS;
+}
+
+static ENGINE_ERROR_CODE do_map_elem_add(map_meta_info *info, map_elem_item *elem,
+                                         const void *cookie)
+{
+    int real_mcnt = (int)(info->mcnt > 0 ? info->mcnt : config->max_map_size);
+    ssize_t space_delta;
+
+#ifdef ENABLE_STICKY_ITEM
+    if (IS_STICKY_COLLFLG(info) && do_item_sticky_overflowed())
+        return ENGINE_ENOMEM;
+#endif
+    if (real_mcnt > 0 && (int)info->ccnt >= real_mcnt)
+        return ENGINE_EOVERFLOW;
+
+    ENGINE_ERROR_CODE ret = htree_elem_insert((htree_node **)&info->root,
+                                             (htree_elem_item *)elem,
+                                             &space_delta, cookie);
+    if (ret != ENGINE_SUCCESS)
+        return ret;
+
+    CLOG_MAP_ELEM_INSERT(info, NULL, elem);
+    info->ccnt++;
+    do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)space_delta);
+
+    return ENGINE_SUCCESS;
+}
+
 static ENGINE_ERROR_CODE do_map_elem_insert(hash_item *it, map_elem_item *elem,
                                             const bool replace_if_exist, bool *replaced,
                                             const void *cookie)
 {
     map_meta_info *info = (map_meta_info *)item_get_meta(it);
-    int real_mcnt = (int)(info->mcnt > 0 ? info->mcnt : config->max_map_size);
-    ssize_t space_delta;
 
+    /* find existing element with the same field key */
     htree_find_result find_result;
     if (htree_elem_find((htree_node *)info->root, elem->nkey, elem->data, &find_result)) {
         if (!replace_if_exist)
             return ENGINE_ELEM_EEXISTS;
-        map_elem_item *old_elem = (map_elem_item *)find_result.elem;
-#ifdef ENABLE_STICKY_ITEM
-        if (IS_STICKY_COLLFLG(info) && (size_t)old_elem->nbytes < (size_t)elem->nbytes
-            && do_item_sticky_overflowed())
-            return ENGINE_ENOMEM;
-#endif
-        htree_elem_replace_at((htree_node **)&info->root, &find_result,
-                              (htree_elem_item *)elem, &space_delta);
-        CLOG_MAP_ELEM_INSERT(info, old_elem, elem);
-        if (old_elem->refcount == 0)
-            htree_elem_free(old_elem);
-        if (replaced) *replaced = true;
-        if (space_delta > 0)
-            do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)space_delta);
-        else if (space_delta < 0)
-            do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);
-    } else {
-#ifdef ENABLE_STICKY_ITEM
-        if (IS_STICKY_COLLFLG(info) && do_item_sticky_overflowed())
-            return ENGINE_ENOMEM;
-#endif
-        if (real_mcnt > 0 && (int)info->ccnt >= real_mcnt)
-            return ENGINE_EOVERFLOW;
-        ENGINE_ERROR_CODE ret = htree_elem_insert((htree_node **)&info->root,
-                                               (htree_elem_item *)elem,
-                                               &space_delta, cookie);
-        if (ret != ENGINE_SUCCESS)
-            return ret;
-        CLOG_MAP_ELEM_INSERT(info, NULL, elem);
-        info->ccnt++;
-        do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)space_delta);
+        return do_map_elem_replace(info, &find_result,
+                                   (map_elem_item *)find_result.elem, elem, replaced);
     }
 
-    return ENGINE_SUCCESS;
+    return do_map_elem_add(info, elem, cookie);
 }
 
 /*
