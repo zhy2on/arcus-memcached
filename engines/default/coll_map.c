@@ -129,15 +129,17 @@ static ENGINE_ERROR_CODE do_map_elem_delete_with_field(map_meta_info *info,
     if (info->root == NULL)
         return ENGINE_ELEM_ENOENT;
 
+    map_elem_item *elem;
     ssize_t space_delta;
-    bool found = htree_elem_traverse_dfs_bykey((htree_node **)&info->root, info->root,
-                                               field->length,
-                                               (const unsigned char *)field->value,
-                                               true, NULL,
-                                               do_map_elem_unlink_clog, info, &space_delta);
-    if (!found)
+    bool deleted = htree_elem_delete((htree_node **)&info->root,
+                                     field->length,
+                                     (const unsigned char *)field->value,
+                                     (htree_elem_item **)&elem, &space_delta);
+    if (!deleted)
         return ENGINE_ELEM_ENOENT;
 
+    CLOG_MAP_ELEM_DELETE(info, elem, ELEM_DELETE_NORMAL);
+    htree_elem_release((htree_elem_item *)elem);
     info->ccnt--;
     if (space_delta != 0)
         do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (size_t)-space_delta);

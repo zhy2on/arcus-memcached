@@ -131,14 +131,16 @@ static ENGINE_ERROR_CODE do_set_elem_delete_with_value(set_meta_info *info,
     if (info->root == NULL)
         return ENGINE_ELEM_ENOENT;
 
+    set_elem_item *elem;
     ssize_t space_delta;
-    bool found = htree_elem_traverse_dfs_bykey((htree_node **)&info->root, info->root,
-                                               vlen, (const unsigned char *)val,
-                                               true, NULL,
-                                               do_set_elem_unlink_clog, info, &space_delta);
-    if (!found)
+    bool deleted = htree_elem_delete((htree_node **)&info->root,
+                                     vlen, (const unsigned char *)val,
+                                     (htree_elem_item **)&elem, &space_delta);
+    if (!deleted)
         return ENGINE_ELEM_ENOENT;
 
+    CLOG_SET_ELEM_DELETE(info, elem, cause);
+    htree_elem_release((htree_elem_item *)elem);
     info->ccnt--;
     if (space_delta != 0)
         do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_SET, (size_t)-space_delta);
