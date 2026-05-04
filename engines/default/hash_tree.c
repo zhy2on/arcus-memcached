@@ -53,6 +53,11 @@ static void do_htree_node_free(htree_node *node)
     do_item_mem_free(node, sizeof(htree_node));
 }
 
+static inline void space_delta_add(ssize_t *delta, ssize_t size)
+{
+    if (delta) *delta += size;
+}
+
 static void do_htree_elem_unlink(htree_node **root_pptr,
                                  htree_node *node, int hidx,
                                  htree_elem_item *prev, htree_elem_item *elem)
@@ -75,8 +80,7 @@ static void do_htree_elem_unlink(htree_node **root_pptr,
 }
 
 static void do_htree_node_unlink(htree_node **root_pptr,
-                                 htree_node *par_node, const int par_hidx,
-                                 ssize_t *space_delta_out)
+                                 htree_node *par_node, const int par_hidx)
 {
     htree_node *node;
 
@@ -85,6 +89,7 @@ static void do_htree_node_unlink(htree_node **root_pptr,
         *root_pptr = NULL;
         assert(node->tot_elem_cnt == 0);
     } else {
+        /* merge all elems from child node back into par_node's chain */
         assert(par_node->hcnt[par_hidx] == -1); /* child hash node */
         htree_elem_item *head = NULL;
         htree_elem_item *elem;
@@ -112,9 +117,6 @@ static void do_htree_node_unlink(htree_node **root_pptr,
         par_node->htab[par_hidx] = head;
         par_node->hcnt[par_hidx] = fcnt;
     }
-
-    if (space_delta_out)
-        *space_delta_out = -(ssize_t)slabs_space_size(sizeof(htree_node));
 
     do_htree_node_free(node);
 }
@@ -165,6 +167,7 @@ static inline bool is_leaf_node(const htree_node *node)
 static void do_htree_node_link(htree_node *par_node, const int par_hidx,
                                htree_node *node)
 {
+    /* redistribute elems from par_node's chain into the new child node (split) */
     htree_elem_item *elem;
     while (par_node->htab[par_hidx] != NULL) {
         elem = (htree_elem_item *)par_node->htab[par_hidx];
@@ -311,7 +314,6 @@ ENGINE_ERROR_CODE htree_elem_insert(htree_node **root_pptr,
     }
 
     /* split the hash chain into a new child node if it is full */
-    bool node_created = new_root;
     if (node->hcnt[hidx] >= HTREE_MAX_HASHCHAIN_SIZE) {
         htree_node *n_node = do_htree_node_alloc(node->hdepth + 1, cookie);
         if (n_node == NULL) {
@@ -322,19 +324,16 @@ ENGINE_ERROR_CODE htree_elem_insert(htree_node **root_pptr,
             return ENGINE_ENOMEM;
         }
         do_htree_node_link(node, hidx, n_node);
+        space_delta_add(space_delta_out, (ssize_t)slabs_space_size(sizeof(htree_node)));
         node  = n_node;
         hidx  = HTREE_GET_HASHIDX(elem->hval, node->hdepth);
-        node_created = true;
     }
 
     do_htree_elem_link(root_pptr, node, hidx, elem);
-
-    if (space_delta_out) {
-        size_t new_ntotal = offsetof(htree_elem_item, data) + elem->nbytes;
-        *space_delta_out = (ssize_t)slabs_space_size(new_ntotal);
-        if (node_created)
-            *space_delta_out += (ssize_t)slabs_space_size(sizeof(htree_node));
-    }
+    space_delta_add(space_delta_out, (ssize_t)slabs_space_size(
+                        offsetof(htree_elem_item, data) + elem->nbytes));
+    if (new_root)
+        space_delta_add(space_delta_out, (ssize_t)slabs_space_size(sizeof(htree_node)));
     return ENGINE_SUCCESS;
 }
 
@@ -360,9 +359,8 @@ static htree_elem_item *do_htree_elem_at_offset(htree_node **root_pptr,
             if (delete) {
                 if (is_leaf_node(child_node) &&
                     child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE / 2)) {
-                    ssize_t node_delta = 0;
-                    do_htree_node_unlink(root_pptr, node, hidx, &node_delta);
-                    if (space_delta_out) *space_delta_out += node_delta;
+                    do_htree_node_unlink(root_pptr, node, hidx);
+                    space_delta_add(space_delta_out, -(ssize_t)slabs_space_size(sizeof(htree_node)));
                 }
                 node->tot_elem_cnt -= 1;
             }
@@ -382,9 +380,8 @@ static htree_elem_item *do_htree_elem_at_offset(htree_node **root_pptr,
             elem->refcount++;
             if (delete) {
                 do_htree_elem_unlink(root_pptr, node, hidx, prev, elem);
-                if (space_delta_out)
-                    *space_delta_out -= (ssize_t)slabs_space_size(
-                                            offsetof(htree_elem_item, data) + elem->nbytes);
+                space_delta_add(space_delta_out, -(ssize_t)slabs_space_size(
+                                    offsetof(htree_elem_item, data) + elem->nbytes));
                 if (unlink_fn != NULL)
                     unlink_fn(meta, elem);
                 if (elem->refcount == 0)
@@ -450,9 +447,8 @@ int htree_elem_traverse_rand(htree_node **root_pptr,
             total_count--;
         }
         if (*root_pptr != NULL && (*root_pptr)->tot_elem_cnt == 0) {
-            ssize_t node_delta = 0;
-            do_htree_node_unlink(root_pptr, NULL, 0, &node_delta);
-            if (space_delta_out) *space_delta_out += node_delta;
+            do_htree_node_unlink(root_pptr, NULL, 0);
+            space_delta_add(space_delta_out, -(ssize_t)slabs_space_size(sizeof(htree_node)));
         }
     } else if (count <= total_count / 10) {
         /* sparse: use offset dedup hash table */
@@ -515,9 +511,8 @@ static bool do_htree_elem_traverse_bykey(htree_node **root_pptr,
         if (found && delete) {
             if (is_leaf_node(child_node) &&
                 child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE / 2)) {
-                ssize_t node_delta = 0;
-                do_htree_node_unlink(root_pptr, node, hidx, &node_delta);
-                if (space_delta_out) *space_delta_out += node_delta;
+                do_htree_node_unlink(root_pptr, node, hidx);
+                space_delta_add(space_delta_out, -(ssize_t)slabs_space_size(sizeof(htree_node)));
             }
             node->tot_elem_cnt -= 1;
         }
@@ -536,9 +531,8 @@ static bool do_htree_elem_traverse_bykey(htree_node **root_pptr,
                 }
                 if (delete) {
                     do_htree_elem_unlink(root_pptr, node, hidx, prev, elem);
-                    if (space_delta_out)
-                        *space_delta_out -= (ssize_t)slabs_space_size(
-                                                offsetof(htree_elem_item, data) + elem->nbytes);
+                    space_delta_add(space_delta_out, -(ssize_t)slabs_space_size(
+                                        offsetof(htree_elem_item, data) + elem->nbytes));
                     if (unlink_fn != NULL)
                         unlink_fn(meta, elem);
                     if (elem->refcount == 0)
@@ -563,6 +557,7 @@ bool htree_elem_delete(htree_node **root_pptr,
 
     uint32_t hval = genhash_string_hash(data, nkey);
 
+    /* traverse to the leaf node, tracking parent for potential merge */
     htree_node *par_node = NULL;
     int par_hidx = 0;
     htree_node *node = *root_pptr;
@@ -575,6 +570,7 @@ bool htree_elem_delete(htree_node **root_pptr,
         node = (htree_node *)node->htab[hidx];
     }
 
+    /* find the element in the hash chain */
     htree_elem_item *prev = NULL;
     htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
     while (elem != NULL) {
@@ -586,22 +582,18 @@ bool htree_elem_delete(htree_node **root_pptr,
     }
     if (elem == NULL) return false;
 
+    /* unlink the element and return it to the caller */
     do_htree_elem_unlink(root_pptr, node, hidx, prev, elem);
-    if (space_delta_out)
-        *space_delta_out -= (ssize_t)slabs_space_size(
-                                offsetof(htree_elem_item, data) + elem->nbytes);
+    space_delta_add(space_delta_out, -(ssize_t)slabs_space_size(
+                        offsetof(htree_elem_item, data) + elem->nbytes));
     *elem_out = elem;
 
-    if (node->tot_elem_cnt == 0) {
-        ssize_t node_delta = 0;
-        do_htree_node_unlink(root_pptr, par_node, par_node ? par_hidx : 0, &node_delta);
-        if (space_delta_out) *space_delta_out += node_delta;
-    } else if (par_node != NULL &&
-               is_leaf_node(node) &&
-               node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE / 2)) {
-        ssize_t node_delta = 0;
-        do_htree_node_unlink(root_pptr, par_node, par_hidx, &node_delta);
-        if (space_delta_out) *space_delta_out += node_delta;
+    /* merge child node into parent if empty or below merge threshold */
+    if (node->tot_elem_cnt == 0 ||
+        (par_node != NULL && is_leaf_node(node) &&
+         node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE / 2))) {
+        do_htree_node_unlink(root_pptr, par_node, par_hidx);
+        space_delta_add(space_delta_out, -(ssize_t)slabs_space_size(sizeof(htree_node)));
     }
     return true;
 }
@@ -622,9 +614,8 @@ bool htree_elem_traverse_dfs_bykey(htree_node **root_pptr,
                                               delete, elem_out, unlink_fn, meta,
                                               space_delta_out);
     if (found && delete && *root_pptr != NULL && (*root_pptr)->tot_elem_cnt == 0) {
-        ssize_t node_delta = 0;
-        do_htree_node_unlink(root_pptr, NULL, 0, &node_delta);
-        if (space_delta_out) *space_delta_out += node_delta;
+        do_htree_node_unlink(root_pptr, NULL, 0);
+        space_delta_add(space_delta_out, -(ssize_t)slabs_space_size(sizeof(htree_node)));
     }
     return found;
 }
@@ -653,9 +644,8 @@ int htree_elem_traverse_dfs_bycnt(htree_node **root_pptr,
             if (delete) {
                 if (is_leaf_node(child_node) &&
                     child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE / 2)) {
-                    ssize_t node_delta = 0;
-                    do_htree_node_unlink(root_pptr, node, hidx, &node_delta);
-                    if (space_delta_out) *space_delta_out += node_delta;
+                    do_htree_node_unlink(root_pptr, node, hidx);
+                    space_delta_add(space_delta_out, -(ssize_t)slabs_space_size(sizeof(htree_node)));
                 }
                 node->tot_elem_cnt -= ecnt;
             }
@@ -670,9 +660,8 @@ int htree_elem_traverse_dfs_bycnt(htree_node **root_pptr,
                 if (delete) {
                     htree_elem_item *next = elem->next;
                     do_htree_elem_unlink(root_pptr, node, hidx, NULL, elem);
-                    if (space_delta_out)
-                        *space_delta_out -= (ssize_t)slabs_space_size(
-                                                offsetof(htree_elem_item, data) + elem->nbytes);
+                    space_delta_add(space_delta_out, -(ssize_t)slabs_space_size(
+                                        offsetof(htree_elem_item, data) + elem->nbytes));
                     if (unlink_fn != NULL) {
                         unlink_fn(meta, elem);
                     }
@@ -688,9 +677,8 @@ int htree_elem_traverse_dfs_bycnt(htree_node **root_pptr,
         if (count > 0 && fcnt >= (int)count) break;
     }
     if (delete && node == *root_pptr && node->tot_elem_cnt == 0) {
-        ssize_t node_delta = 0;
-        do_htree_node_unlink(root_pptr, NULL, 0, &node_delta);
-        if (space_delta_out) *space_delta_out += node_delta;
+        do_htree_node_unlink(root_pptr, NULL, 0);
+        space_delta_add(space_delta_out, -(ssize_t)slabs_space_size(sizeof(htree_node)));
     }
     return fcnt;
 }
