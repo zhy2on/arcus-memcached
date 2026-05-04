@@ -527,6 +527,63 @@ static bool do_htree_elem_traverse_bykey(htree_node **root_pptr,
     return false;
 }
 
+bool htree_elem_delete(htree_node **root_pptr,
+                       uint16_t nkey, const unsigned char *data,
+                       htree_elem_item **elem_out,
+                       ssize_t *space_delta_out)
+{
+    if (*root_pptr == NULL) return false;
+    if (space_delta_out) *space_delta_out = 0;
+
+    uint32_t hval = genhash_string_hash(data, nkey);
+
+    htree_node *par_node = NULL;
+    int par_hidx = 0;
+    htree_node *node = *root_pptr;
+    int hidx;
+    while (true) {
+        hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
+        if (node->hcnt[hidx] >= 0) break;
+        par_node = node;
+        par_hidx = hidx;
+        node = (htree_node *)node->htab[hidx];
+    }
+
+    htree_elem_item *prev = NULL;
+    htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
+    while (elem != NULL) {
+        if (elem->hval == hval && elem->nkey == nkey &&
+            memcmp(elem->data, data, nkey) == 0)
+            break;
+        prev = elem;
+        elem = elem->next;
+    }
+    if (elem == NULL) return false;
+
+    if (elem_out) {
+        elem->refcount++;
+        *elem_out = elem;
+    }
+    ssize_t delta = 0;
+    do_htree_elem_unlink(node, hidx, prev, elem, &delta);
+    if (space_delta_out) *space_delta_out += delta;
+    if (elem->refcount == 0)
+        htree_elem_free(elem);
+
+    if (node->tot_elem_cnt == 0) {
+        ssize_t node_delta = 0;
+        do_htree_node_unlink(root_pptr, par_node, par_node ? par_hidx : 0, &node_delta);
+        if (space_delta_out) *space_delta_out += node_delta;
+    } else if (par_node != NULL &&
+               is_leaf_node(node) &&
+               node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE / 2)) {
+        ssize_t node_delta = 0;
+        do_htree_node_unlink(root_pptr, par_node, par_hidx, &node_delta);
+        if (space_delta_out) *space_delta_out += node_delta;
+    }
+    return true;
+}
+
 bool htree_elem_traverse_dfs_bykey(htree_node **root_pptr,
                                    htree_node *node,
                                    uint16_t nkey,

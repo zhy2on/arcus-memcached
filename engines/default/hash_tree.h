@@ -76,6 +76,11 @@ ENGINE_ERROR_CODE htree_elem_insert(htree_node **root_pptr,
                                     ssize_t *space_delta_out,
                                     const void *cookie);
 
+bool htree_elem_delete(htree_node **root_pptr,
+                       uint16_t nkey, const unsigned char *data,
+                       htree_elem_item **elem_out,
+                       ssize_t *space_delta_out);
+
 int htree_elem_traverse_rand(htree_node **root_pptr,
                              htree_node *node,
                              uint32_t total_count,
