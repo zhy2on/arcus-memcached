@@ -353,9 +353,8 @@ ENGINE_ERROR_CODE set_elem_exist(const char *key, const uint32_t nkey,
             if ((info->mflags & COLL_META_FLAG_READABLE) == 0) {
                 ret = ENGINE_UNREADABLE; break;
             }
-            *exist = htree_elem_traverse_dfs_bykey((htree_node **)&info->root, info->root,
-                                                   nbytes, (const unsigned char *)value,
-                                                   false, NULL, NULL, NULL, NULL);
+            *exist = htree_elem_find((htree_node *)info->root,
+                                     nbytes, (const unsigned char *)value, NULL);
         } while (0);
         do_item_release(it);
     }
