@@ -118,14 +118,9 @@ static hash_item *do_set_item_alloc(const void *key, const uint32_t nkey,
     return it;
 }
 
-static void do_set_elem_unlink_clog(void *meta, htree_elem_item *elem)
-{
-    CLOG_SET_ELEM_DELETE((set_meta_info *)meta, elem, ELEM_DELETE_NORMAL);
-}
-
 static ENGINE_ERROR_CODE do_set_elem_delete_by_value(set_meta_info *info,
-                                                       const char *val, const int vlen,
-                                                       enum elem_delete_cause cause)
+                                                     const char *val, const int vlen,
+                                                     enum elem_delete_cause cause)
 {
     assert(cause == ELEM_DELETE_NORMAL);
     if (info->root == NULL)
@@ -151,26 +146,42 @@ static uint32_t do_set_elem_get(set_meta_info *info,
                                 set_elem_item **elem_array)
 {
     assert(info->root);
-    uint32_t fcnt;
-    ssize_t space_delta;
+    uint32_t fcnt = 0;
+    ssize_t space_delta = 0;
 
     if (delete) {
         CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, count, ELEM_DELETE_NORMAL);
     }
     if (count >= info->ccnt || count == 0) { /* Return all */
-        htree_elem_unlink_func fn = delete ? do_set_elem_unlink_clog : NULL;
-        fcnt = htree_elem_traverse_dfs_by_cnt((htree_node **)&info->root, info->root,
-                                             count, delete,
-                                             (htree_elem_item **)elem_array,
-                                             fn, info,
-                                             fn ? &space_delta : NULL);
+        if (delete) {
+            htree_elem_item *head = htree_elem_delete_by_cnt((htree_node **)&info->root,
+                                                          0, &space_delta);
+            for (htree_elem_item *e = head; e != NULL; e = e->next) {
+                CLOG_SET_ELEM_DELETE(info, (set_elem_item *)e, ELEM_DELETE_NORMAL);
+                elem_array[fcnt++] = (set_elem_item *)e;
+            }
+        } else {
+            fcnt = htree_elem_get_by_cnt(info->root, 0,
+                                      (htree_elem_item **)elem_array);
+        }
     } else { /* Return some */
-        fcnt = htree_elem_traverse_rand((htree_node **)&info->root, info->root,
-                                        info->ccnt, count, delete,
-                                        (htree_elem_item **)elem_array,
-                                        delete ? do_set_elem_unlink_clog : NULL,
-                                        info,
-                                        delete ? &space_delta : NULL);
+        if (delete) {
+            uint32_t total_count = info->ccnt;
+            while (fcnt < count) {
+                uint32_t rand_offset = (uint32_t)(rand() % (int)total_count);
+                set_elem_item *elem;
+                ssize_t delta;
+                htree_elem_delete_at_offset((htree_node **)&info->root, rand_offset,
+                                            (htree_elem_item **)&elem, &delta);
+                CLOG_SET_ELEM_DELETE(info, elem, ELEM_DELETE_NORMAL);
+                elem_array[fcnt++] = elem;
+                space_delta += delta;
+                total_count--;
+            }
+        } else {
+            fcnt = htree_elem_get_rand(info->root, info->ccnt, count,
+                                       (htree_elem_item **)elem_array);
+        }
     }
     if (delete) {
         info->ccnt -= fcnt;
@@ -424,8 +435,15 @@ uint32_t set_elem_delete_with_count(set_meta_info *info, const uint32_t count)
 {
     uint32_t fcnt = 0;
     if (info->root != NULL) {
-        fcnt = htree_elem_traverse_dfs_by_cnt((htree_node **)&info->root, info->root,
-                                             count, true, NULL, NULL, NULL, NULL);
+        htree_elem_item *head = htree_elem_delete_by_cnt((htree_node **)&info->root,
+                                                         count, NULL);
+        htree_elem_item *e = head;
+        while (e != NULL) {
+            htree_elem_item *next = e->next;
+            htree_elem_release(e);
+            e = next;
+            fcnt++;
+        }
     }
     return fcnt;
 }
@@ -433,10 +451,8 @@ uint32_t set_elem_delete_with_count(set_meta_info *info, const uint32_t count)
 void set_elem_get_all(set_meta_info *info, elems_result_t *eresult)
 {
     assert(eresult->elem_arrsz >= info->ccnt && eresult->elem_count == 0);
-    eresult->elem_count = htree_elem_traverse_dfs_by_cnt((htree_node **)&info->root, info->root,
-                                                        0, false,
-                                                        (htree_elem_item **)eresult->elem_array,
-                                                        NULL, NULL, NULL);
+    eresult->elem_count = htree_elem_get_by_cnt(info->root, 0,
+                                                (htree_elem_item **)eresult->elem_array);
     assert(eresult->elem_count == info->ccnt);
 }
 

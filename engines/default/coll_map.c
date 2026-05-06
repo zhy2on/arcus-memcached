@@ -118,11 +118,6 @@ static hash_item *do_map_item_alloc(const void *key, const uint32_t nkey,
     return it;
 }
 
-static void do_map_elem_unlink_clog(void *meta, htree_elem_item *elem)
-{
-    CLOG_MAP_ELEM_DELETE((map_meta_info *)meta, elem, ELEM_DELETE_NORMAL);
-}
-
 static ENGINE_ERROR_CODE do_map_elem_delete_by_field(map_meta_info *info,
                                                        const field_t *field)
 {
@@ -194,22 +189,26 @@ static uint32_t do_map_elem_traverse_all(map_meta_info *info,
                                          const bool delete, map_elem_item **elem_array)
 {
     assert(info->root);
-    ssize_t space_delta = 0;
-
     if (delete) {
+        ssize_t space_delta = 0;
+        uint32_t fcnt = 0;
         CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, 0, ELEM_DELETE_NORMAL);
-    }
-    htree_elem_unlink_func fn = delete ? do_map_elem_unlink_clog : NULL;
-    uint32_t fcnt = htree_elem_traverse_dfs_by_cnt((htree_node **)&info->root, info->root,
-                                                  0, delete, (htree_elem_item **)elem_array,
-                                                  fn, info,
-                                                  fn ? &space_delta : NULL);
-    if (delete) {
+        htree_elem_item *head = htree_elem_delete_by_cnt((htree_node **)&info->root,
+                                                         0, &space_delta);
+        for (htree_elem_item *e = head; e != NULL; ) {
+            htree_elem_item *next = e->next;
+            CLOG_MAP_ELEM_DELETE(info, (map_elem_item *)e, ELEM_DELETE_NORMAL);
+            if (elem_array) elem_array[fcnt] = (map_elem_item *)e;
+            else htree_elem_release(e);
+            fcnt++;
+            e = next;
+        }
         info->ccnt -= fcnt;
         do_coll_space_update((coll_meta_info *)info, ITEM_TYPE_MAP, space_delta);
         CLOG_ELEM_DELETE_END((coll_meta_info*)info, ELEM_DELETE_NORMAL);
+        return fcnt;
     }
-    return fcnt;
+    return htree_elem_get_by_cnt(info->root, 0, (htree_elem_item **)elem_array);
 }
 
 static uint32_t do_map_elem_traverse_by_field(map_meta_info *info,
@@ -470,7 +469,7 @@ ENGINE_ERROR_CODE map_elem_delete(const char *key, const uint32_t nkey,
         map_meta_info *info = (map_meta_info *)item_get_meta(it);
         if (info->root != NULL) {
             if (numfields == 0)
-                *del_count = do_map_elem_traverse_all(info, true /* delete */, NULL);
+                *del_count = do_map_elem_traverse_all(info, true, NULL);
             else
                 *del_count = do_map_elem_traverse_by_field(info, numfields, flist, true /* delete */, NULL);
         }
@@ -558,23 +557,23 @@ uint32_t map_elem_delete_with_count(map_meta_info *info, const uint32_t count)
 {
     uint32_t fcnt = 0;
     if (info->root != NULL) {
-        fcnt = htree_elem_traverse_dfs_by_cnt((htree_node **)&info->root, info->root,
-                                             count, true, NULL, NULL, NULL, NULL);
+        htree_elem_item *head = htree_elem_delete_by_cnt((htree_node **)&info->root,
+                                                          count, NULL);
+        for (htree_elem_item *e = head; e != NULL; ) {
+            htree_elem_item *next = e->next;
+            htree_elem_release(e);
+            e = next;
+            fcnt++;
+        }
     }
     return fcnt;
 }
 
-/* See do_map_elem_traverse_dfs and do_map_elem_link. do_map_elem_traverse_dfs
- * can visit all elements, but only supports get and delete operations.
- * Do something similar and visit all elements.
- */
 void map_elem_get_all(map_meta_info *info, elems_result_t *eresult)
 {
     assert(eresult->elem_arrsz >= info->ccnt && eresult->elem_count == 0);
-    eresult->elem_count = htree_elem_traverse_dfs_by_cnt((htree_node **)&info->root, info->root,
-                                                        0, false,
-                                                        (htree_elem_item **)eresult->elem_array,
-                                                        NULL, NULL, NULL);
+    eresult->elem_count = htree_elem_get_by_cnt(info->root, 0,
+                                                (htree_elem_item **)eresult->elem_array);
     assert(eresult->elem_count == info->ccnt);
 }
 

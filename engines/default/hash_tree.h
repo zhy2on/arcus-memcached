@@ -45,8 +45,6 @@ typedef struct _htree_node {
     void    *htab[HTREE_HASHTAB_SIZE];
 } htree_node;
 
-typedef void (*htree_elem_unlink_func)(void *meta, htree_elem_item *elem);
-
 typedef struct {
     htree_node      *node;
     int              hidx;
@@ -80,23 +78,24 @@ bool htree_elem_delete(htree_node **root_pptr,
                        htree_elem_item **elem_out,
                        ssize_t *space_delta_out);
 
-int htree_elem_traverse_rand(htree_node **root_pptr,
-                             htree_node *node,
-                             uint32_t total_count,
-                             uint32_t count,
-                             bool delete,
-                             htree_elem_item **elem_array,
-                             htree_elem_unlink_func unlink_fn,
-                             void *meta,
-                             ssize_t *space_delta_out);
+htree_elem_item *htree_elem_get_at_offset(htree_node *node, uint32_t offset);
 
-int htree_elem_traverse_dfs_by_cnt(htree_node **root_pptr,
-                                  htree_node *node,
-                                  uint32_t count,
-                                  bool delete,
-                                  htree_elem_item **elem_array,
-                                  htree_elem_unlink_func unlink_fn,
-                                  void *meta,
-                                  ssize_t *space_delta_out);
+bool htree_elem_delete_at_offset(htree_node **root_pptr,
+                                 uint32_t offset,
+                                 htree_elem_item **elem_out,
+                                 ssize_t *space_delta_out);
+
+int htree_elem_get_rand(htree_node *node,
+                        uint32_t total_count,
+                        uint32_t count,
+                        htree_elem_item **elem_array);
+
+int htree_elem_get_by_cnt(htree_node *node,
+                          uint32_t count,
+                          htree_elem_item **elem_array);
+
+htree_elem_item *htree_elem_delete_by_cnt(htree_node **root_pptr,
+                                          uint32_t count,
+                                          ssize_t *space_delta_out);
 
 #endif
