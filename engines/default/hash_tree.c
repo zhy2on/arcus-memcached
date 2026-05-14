@@ -345,6 +345,35 @@ static uint32_t do_htree_range(htree_node **root_pptr,
     return fcnt;
 }
 
+/* DFS over the hash tree: collect count elems by deciding each one randomly.
+ * Each elem is accepted with probability (needed / remain). */
+static int do_htree_sampling(htree_node *node,
+                             uint32_t remain, uint32_t count,
+                             htree_elem_item **elem_array)
+{
+    int fcnt = 0;
+    for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
+        if (node->hcnt[hidx] == -1) {
+            htree_node *child_node = (htree_node *)node->htab[hidx];
+            fcnt += do_htree_sampling(child_node, remain,
+                                      count - fcnt, &elem_array[fcnt]);
+            remain -= child_node->tot_elem_cnt; /* mark child's elems as seen */
+        } else if (node->hcnt[hidx] > 0) {
+            htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
+            while (elem != NULL) {
+                if ((rand() % remain) < (count - (uint32_t)fcnt)) {
+                    elem_array[fcnt++] = elem;
+                    if ((uint32_t)fcnt >= count) break;
+                }
+                remain -= 1;
+                elem = elem->next;
+            }
+        }
+        if ((uint32_t)fcnt >= count) break;
+    }
+    return fcnt;
+}
+
 htree_elem_item *htree_elem_find(htree_node *root,
                                  const void *key, uint16_t nkey,
                                  htree_ops *ops,
@@ -483,6 +512,39 @@ htree_elem_item *htree_elem_unlink(htree_node **root_pptr,
     return elem;
 }
 
+htree_elem_item *htree_elem_get_at_offset(htree_node *node, uint32_t offset)
+{
+    /* acts as a 1-elem array for collect_to_array */
+    htree_elem_item *elem = NULL;
+    uint32_t skip = offset, take = 1;
+    htree_collect_ctx ctx = { .pos = &elem };
+
+    /* skip `offset`, read 1 */
+    do_htree_range(&node, node, &skip, &take, false, collect_to_array, &ctx, NULL);
+    return elem;
+}
+
+htree_elem_item *htree_elem_unlink_at_offset(htree_node **root_pptr,
+                                             uint32_t offset,
+                                             ssize_t *htree_space_delta)
+{
+    if (*root_pptr == NULL) return NULL;
+    if (htree_space_delta) *htree_space_delta = 0;
+
+    /* sentinel head: collect_to_chain links the result onto dummy.next */
+    htree_elem_item dummy = {0};
+    uint32_t skip = offset, take = 1;
+    htree_collect_ctx ctx = { .tail = &dummy };
+
+    /* skip `offset`, unlink 1 */
+    do_htree_range(root_pptr, *root_pptr, &skip, &take, true, collect_to_chain, &ctx,
+                   htree_space_delta);
+    if (dummy.next == NULL) return NULL;
+
+    do_htree_node_try_merge(root_pptr, NULL, 0, *root_pptr, htree_space_delta);
+    return dummy.next;
+}
+
 htree_elem_item *htree_elem_unlink_by_cnt(htree_node **root_pptr,
                                           uint32_t count,
                                           ssize_t *htree_space_delta)
@@ -531,5 +593,50 @@ uint32_t htree_elem_get_by_cnt(htree_node **root_pptr,
 
     if (unlink)
         do_htree_node_try_merge(root_pptr, NULL, 0, *root_pptr, htree_space_delta);
+    return fcnt;
+}
+
+int htree_elem_get_rand(htree_node *node,
+                        uint32_t total_count, uint32_t count,
+                        htree_elem_item **elem_array)
+{
+    int fcnt = 0;
+
+    if (count <= total_count / 10) {
+        /* sparse: offset dedup hash table */
+        int capacity = (int)(1.3 * (double)count);
+        typedef struct { int cnt; int keys[3]; } _bucket;
+        _bucket *buckets = calloc(capacity, sizeof(_bucket));
+        if (buckets == NULL) return 0;
+        while ((uint32_t)fcnt < count) {
+            int rand_offset = rand() % (int)total_count;
+            int idx = rand_offset % capacity;
+            _bucket *b = &buckets[idx];
+            bool dup = false;
+            for (int i = 0; i < b->cnt; i++) {
+                if (b->keys[i] == rand_offset) { dup = true; break; }
+            }
+            if (!dup && b->cnt < 3) {
+                b->keys[b->cnt++] = rand_offset;
+                htree_elem_item *found = htree_elem_get_at_offset(node, rand_offset);
+                assert(found != NULL);
+                elem_array[fcnt++] = found;
+            }
+        }
+        free(buckets);
+    } else {
+        /* dense: reservoir sampling + Fisher-Yates shuffle */
+        fcnt = do_htree_sampling(node, total_count, count, elem_array); /* reservoir sampling */
+
+        /* sampling collects elems in DFS order, so shuffle to randomize output order */
+        for (int i = fcnt - 1; i > 0; i--) { /* Fisher-Yates shuffle */
+            int rand_idx = rand() % (i + 1);
+            if (rand_idx != i) {
+                htree_elem_item *tmp = elem_array[i];
+                elem_array[i] = elem_array[rand_idx];
+                elem_array[rand_idx] = tmp;
+            }
+        }
+    }
     return fcnt;
 }

@@ -63,52 +63,6 @@ static htree_ops set_htree_ops = {
 };
 
 /*
- * Hash table management
- */
-typedef struct hash_node {
-    int cnt;
-    int keys[3];
-} hash_node;
-
-typedef struct hash_table {
-    hash_node *buckets;
-    int capacity;
-} hash_table;
-
-static bool hash_init(hash_table *ht, int count)
-{
-    ht->capacity = (int)(1.3 * (double)count);
-    ht->buckets = (hash_node*)calloc(ht->capacity, sizeof(hash_node));
-    if (ht->buckets == NULL)
-        return false;
-    return true;
-}
-
-static void hash_free(hash_table *ht)
-{
-    if (ht->buckets) {
-        free(ht->buckets);
-        ht->buckets = NULL;
-        ht->capacity = 0;
-    }
-}
-
-static bool hash_insert(hash_table *ht, int key)
-{
-    size_t idx = key % ht->capacity;
-    hash_node *bucket = &ht->buckets[idx];
-    if (bucket->cnt == 3)
-        return false;
-    for (int i = 0; i < bucket->cnt; i++) {
-        if (bucket->keys[i] == key)
-            return false;
-    }
-    bucket->keys[bucket->cnt] = key;
-    bucket->cnt++;
-    return true;
-}
-
-/*
  * SET collection manangement
  */
 
@@ -118,15 +72,6 @@ static bool hash_insert(hash_table *ht, int key)
 static inline uint32_t do_set_elem_ntotal(set_elem_item *elem)
 {
     return sizeof(set_elem_item) + elem->nbytes;
-}
-
-static inline bool is_leaf_node(set_hash_node *node)
-{
-    for (int hidx = 0; hidx < SET_HASHTAB_SIZE; hidx++) {
-        if (node->hcnt[hidx] == -1)
-            return false;
-    }
-    return true;
 }
 
 static ENGINE_ERROR_CODE do_set_item_find(const void *key, const uint32_t nkey,
@@ -193,11 +138,6 @@ static hash_item *do_set_item_alloc(const void *key, const uint32_t nkey,
     return it;
 }
 
-static void do_set_node_free(set_hash_node *node)
-{
-    do_item_mem_free(node, sizeof(set_hash_node));
-}
-
 static set_elem_item *do_set_elem_alloc(const uint32_t nbytes, const void *cookie)
 {
     size_t ntotal = sizeof(set_elem_item) + nbytes;
@@ -230,258 +170,6 @@ static void do_set_elem_release(set_elem_item *elem)
     if (elem->refcount == 0 && elem->status == ELEM_STATUS_UNLINKED) {
         do_set_elem_free(elem);
     }
-}
-
-static void do_set_node_unlink(set_meta_info *info,
-                               set_hash_node *par_node, const int par_hidx)
-{
-    set_hash_node *node;
-
-    if (par_node == NULL) {
-        node = info->root;
-        info->root = NULL;
-        assert(node->tot_elem_cnt == 0);
-    } else {
-        assert(par_node->hcnt[par_hidx] == -1); /* child hash node */
-        set_elem_item *head = NULL;
-        set_elem_item *elem;
-        int hidx, fcnt = 0;
-
-        node = (set_hash_node *)par_node->htab[par_hidx];
-
-        for (hidx = 0; hidx < SET_HASHTAB_SIZE; hidx++) {
-            assert(node->hcnt[hidx] >= 0);
-            if (node->hcnt[hidx] > 0) {
-                fcnt += node->hcnt[hidx];
-                while (node->htab[hidx] != NULL) {
-                    elem = node->htab[hidx];
-                    node->htab[hidx] = elem->next;
-                    node->hcnt[hidx] -= 1;
-
-                    elem->next = head;
-                    head = elem;
-                }
-                assert(node->hcnt[hidx] == 0);
-            }
-        }
-        assert(fcnt == node->tot_elem_cnt);
-        node->tot_elem_cnt = 0;
-
-        par_node->htab[par_hidx] = head;
-        par_node->hcnt[par_hidx] = fcnt;
-    }
-
-    if (info->stotal > 0) { /* apply memory space */
-        size_t stotal = slabs_space_size(sizeof(set_hash_node));
-        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
-    }
-
-    /* free the node */
-    do_set_node_free(node);
-}
-
-static void do_set_elem_unlink(set_meta_info *info,
-                               set_hash_node *node, const int hidx,
-                               set_elem_item *prev, set_elem_item *elem,
-                               enum elem_delete_cause cause)
-{
-    if (prev != NULL) prev->next = elem->next;
-    else              node->htab[hidx] = elem->next;
-    elem->status = ELEM_STATUS_UNLINKED;
-    node->hcnt[hidx] -= 1;
-    node->tot_elem_cnt -= 1;
-    info->ccnt--;
-
-    CLOG_SET_ELEM_DELETE(info, elem, cause);
-
-    if (info->stotal > 0) { /* apply memory space */
-        size_t stotal = slabs_space_size(do_set_elem_ntotal(elem));
-        do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_SET, stotal);
-    }
-
-    if (elem->refcount == 0) {
-        do_set_elem_free(elem);
-    }
-}
-
-static int do_set_elem_traverse_dfs(set_meta_info *info, set_hash_node *node,
-                                    const uint32_t count, const bool delete,
-                                    set_elem_item **elem_array)
-{
-    int hidx;
-    int fcnt = 0; /* found count */
-
-    for (hidx = 0; hidx < SET_HASHTAB_SIZE; hidx++) {
-        if (node->hcnt[hidx] == -1) {
-            set_hash_node *child_node = (set_hash_node *)node->htab[hidx];
-            int rcnt = (count > 0 ? (count - fcnt) : 0);
-            int ecnt = do_set_elem_traverse_dfs(info, child_node, rcnt, delete,
-                                                (elem_array==NULL ? NULL : &elem_array[fcnt]));
-            fcnt += ecnt;
-            if (delete) {
-                if (child_node->tot_elem_cnt < (SET_MAX_HASHCHAIN_SIZE/2)
-                    && is_leaf_node(child_node)) {
-                    do_set_node_unlink(info, node, hidx);
-                }
-                node->tot_elem_cnt -= ecnt;
-            }
-        } else if (node->hcnt[hidx] > 0) {
-            set_elem_item *elem = node->htab[hidx];
-            while (elem != NULL) {
-                if (elem_array) {
-                    elem->refcount++;
-                    elem_array[fcnt] = elem;
-                }
-                fcnt++;
-                if (delete) do_set_elem_unlink(info, node, hidx, NULL, elem,
-                                               (elem_array==NULL ? ELEM_DELETE_COLL
-                                                                 : ELEM_DELETE_NORMAL));
-                if (count > 0 && fcnt >= count) break;
-                elem = (delete ? node->htab[hidx] : elem->next);
-            }
-        }
-        if (count > 0 && fcnt >= count) break;
-    }
-    return fcnt;
-}
-
-static int do_set_elem_traverse_sampling(set_meta_info *info, set_hash_node *node,
-                                         uint32_t remain, const uint32_t count,
-                                         set_elem_item **elem_array)
-{
-    int hidx;
-    int fcnt = 0; /* found count */
-
-    for (hidx = 0; hidx < SET_HASHTAB_SIZE; hidx++) {
-        if (node->hcnt[hidx] == -1) {
-            set_hash_node *child_node = (set_hash_node *)node->htab[hidx];
-            fcnt += do_set_elem_traverse_sampling(info, child_node, remain,
-                                                  count - fcnt, &elem_array[fcnt]);
-            remain -= child_node->tot_elem_cnt;
-        } else if (node->hcnt[hidx] > 0) {
-            set_elem_item *elem = node->htab[hidx];
-            while (elem != NULL) {
-                if ((rand() % remain) < (count - fcnt)) {
-                    elem->refcount++;
-                    elem_array[fcnt] = elem;
-                    fcnt++;
-                    if (fcnt >= count) break;
-                }
-                remain -= 1;
-                elem = elem->next;
-            }
-        }
-        if (fcnt >= count) break;
-    }
-    return fcnt;
-}
-
-static set_elem_item *do_set_elem_at_offset(set_meta_info *info, set_hash_node *node,
-                                            uint32_t offset, const bool delete)
-{
-    int hidx;
-    for (hidx = 0; hidx < SET_HASHTAB_SIZE; hidx++) {
-        if (node->hcnt[hidx] == -1) {
-            set_hash_node *child_node = (set_hash_node *)node->htab[hidx];
-            if (offset >= child_node->tot_elem_cnt) {
-                offset -= child_node->tot_elem_cnt;
-                continue;
-            }
-            set_elem_item *found = do_set_elem_at_offset(info, child_node, offset, delete);
-            if (delete) {
-                if (child_node->tot_elem_cnt < (SET_MAX_HASHCHAIN_SIZE/2)
-                    && is_leaf_node(child_node)) {
-                    do_set_node_unlink(info, node, hidx);
-                }
-                node->tot_elem_cnt -= 1;
-            }
-            return found;
-        } else if (node->hcnt[hidx] > 0) {
-            if (offset >= node->hcnt[hidx]) {
-                offset -= node->hcnt[hidx];
-                continue;
-            }
-            set_elem_item *prev = NULL;
-            set_elem_item *elem = node->htab[hidx];
-            while (offset > 0) {
-                prev = elem;
-                elem = elem->next;
-                offset -= 1;
-            }
-            elem->refcount++;
-            if (delete) do_set_elem_unlink(info, node, hidx, prev, elem,
-                                           ELEM_DELETE_NORMAL);
-            return elem;
-        }
-    }
-    return NULL;
-}
-
-static uint32_t do_set_elem_traverse_rand(set_meta_info *info,
-                                          const uint32_t count, const bool delete,
-                                          set_elem_item **elem_array)
-{
-    uint32_t fcnt = 0;
-
-    if (delete) { /* Deleting partial elements */
-        while (fcnt < count) {
-            int rand_offset = (rand() % info->ccnt);
-            set_elem_item *found = do_set_elem_at_offset(info, info->root,
-                                                         rand_offset, delete);
-            assert(found != NULL);
-            elem_array[fcnt++] = found;
-        }
-    } else if (count <= info->ccnt / 10) { /* Use hash table */
-        hash_table offset_ht;
-        if (!hash_init(&offset_ht, count))
-            return 0;
-        while (fcnt < count) {
-            int rand_offset = (rand() % info->ccnt);
-            if (hash_insert(&offset_ht, rand_offset)) {
-                set_elem_item *found = do_set_elem_at_offset(info, info->root,
-                                                             rand_offset, delete);
-                assert(found != NULL);
-                elem_array[fcnt++] = found;
-            }
-        }
-        hash_free(&offset_ht);
-    } else { /* Use sampling */
-        fcnt = do_set_elem_traverse_sampling(info, info->root, info->ccnt,
-                                             count, elem_array);
-        for (int i = fcnt - 1; i > 0; i--) {
-            int rand_idx = rand() % (i + 1);
-            if (rand_idx != i) {
-                set_elem_item *temp = elem_array[i];
-                elem_array[i] = elem_array[rand_idx];
-                elem_array[rand_idx] = temp;
-            }
-        }
-    }
-    return fcnt;
-}
-
-static uint32_t do_set_elem_get(set_meta_info *info,
-                                const uint32_t count, const bool delete,
-                                set_elem_item **elem_array)
-{
-    assert(info->root);
-    uint32_t fcnt;
-
-    if (delete) {
-        CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, count, ELEM_DELETE_NORMAL);
-    }
-    if (count >= info->ccnt || count == 0) { /* Return all */
-        fcnt = do_set_elem_traverse_dfs(info, info->root, count, delete, elem_array);
-    } else { /* Return some */
-        fcnt = do_set_elem_traverse_rand(info, count, delete, elem_array);
-    }
-    if (delete && info->root->tot_elem_cnt == 0) {
-        do_set_node_unlink(info, NULL, 0);
-    }
-    if (delete) {
-        CLOG_ELEM_DELETE_END((coll_meta_info*)info, ELEM_DELETE_NORMAL);
-    }
-    return fcnt;
 }
 
 static ENGINE_ERROR_CODE do_set_elem_insert(hash_item *it, set_elem_item *elem,
@@ -677,6 +365,80 @@ ENGINE_ERROR_CODE set_elem_delete(const char *key, const uint32_t nkey,
     return ret;
 }
 
+static uint32_t do_set_elem_get_rand(set_meta_info *info,
+                                     const uint32_t count, const bool delete,
+                                     set_elem_item **elem_array)
+{
+    assert(info->root);
+
+    if (delete) {
+        uint32_t fcnt = 0;
+        ssize_t space_delta = 0;
+        uint32_t total_count = info->ccnt;
+        CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, count, ELEM_DELETE_NORMAL);
+
+        while (fcnt < count) {
+            uint32_t rand_offset = (uint32_t)(rand() % (int)total_count);
+            ssize_t delta;
+            htree_elem_item *unlinked = htree_elem_unlink_at_offset((htree_node **)&info->root,
+                                                                    rand_offset, &delta);
+            set_elem_item *e = (set_elem_item *)unlinked;
+            delta -= do_set_elem_unlink_process(info, e);
+            elem_array[fcnt++] = e;
+            space_delta += delta;
+            total_count--;
+        }
+
+        info->ccnt -= fcnt;
+        do_coll_space_update((coll_meta_info *)info, ITEM_TYPE_SET, space_delta);
+
+        CLOG_ELEM_DELETE_END((coll_meta_info*)info, ELEM_DELETE_NORMAL);
+        return fcnt;
+    }
+
+    uint32_t fcnt = htree_elem_get_rand(info->root, info->ccnt, count,
+                                        (htree_elem_item **)elem_array);
+    for (uint32_t i = 0; i < fcnt; i++) {
+        set_elem_item *e = (set_elem_item *)elem_array[i];
+        e->refcount++;
+        elem_array[i] = e;
+    }
+    return fcnt;
+}
+
+static uint32_t do_set_elem_get_all(set_meta_info *info,
+                                    const bool delete, set_elem_item **elem_array)
+{
+    assert(info->root && elem_array != NULL);
+    ssize_t space_delta;
+    uint32_t fcnt;
+
+    if (delete) {
+        CLOG_ELEM_DELETE_BEGIN((coll_meta_info*)info, 0, ELEM_DELETE_NORMAL);
+
+        fcnt = htree_elem_get_by_cnt((htree_node **)&info->root, 0,
+                                     (htree_elem_item **)elem_array, true, &space_delta);
+        for (uint32_t i = 0; i < fcnt; i++) {
+            set_elem_item *e = (set_elem_item *)elem_array[i];
+            space_delta -= do_set_elem_unlink_process(info, e);
+            elem_array[i] = e;
+        }
+        info->ccnt -= fcnt;
+        do_coll_space_update((coll_meta_info *)info, ITEM_TYPE_SET, space_delta);
+
+        CLOG_ELEM_DELETE_END((coll_meta_info*)info, ELEM_DELETE_NORMAL);
+    } else {
+        fcnt = htree_elem_get_by_cnt((htree_node **)&info->root, 0,
+                                     (htree_elem_item **)elem_array, false, NULL);
+        for (uint32_t i = 0; i < fcnt; i++) {
+            set_elem_item *e = (set_elem_item *)elem_array[i];
+            e->refcount++;
+            elem_array[i] = e;
+        }
+    }
+    return fcnt;
+}
+
 ENGINE_ERROR_CODE set_elem_exist(const char *key, const uint32_t nkey,
                                  const char *value, const uint32_t nbytes,
                                  bool *exist)
@@ -733,8 +495,13 @@ ENGINE_ERROR_CODE set_elem_get(const char *key, const uint32_t nkey,
             if (eresult->elem_array == NULL) {
                 ret = ENGINE_ENOMEM; break;
             }
-            eresult->elem_count = do_set_elem_get(info, count, delete,
-                                                  (set_elem_item**)(eresult->elem_array));
+            if (count == 0 || count >= info->ccnt) {
+                eresult->elem_count = do_set_elem_get_all(info, delete,
+                                                          (set_elem_item**)(eresult->elem_array));
+            } else {
+                eresult->elem_count = do_set_elem_get_rand(info, count, delete,
+                                                           (set_elem_item**)(eresult->elem_array));
+            }
             if (eresult->elem_count == 0) {
                 free(eresult->elem_array);
                 eresult->elem_array = NULL;
@@ -778,74 +545,11 @@ uint32_t set_elem_delete_with_count(set_meta_info *info, const uint32_t count)
     return fcnt;
 }
 
-/* See do_set_elem_traverse_dfs and do_set_elem_link. do_set_elem_traverse_dfs
- * can visit all elements, but only supports get and delete operations.
- * Do something similar and visit all elements.
- */
 void set_elem_get_all(set_meta_info *info, elems_result_t *eresult)
 {
     assert(eresult->elem_arrsz >= info->ccnt && eresult->elem_count == 0);
-    set_hash_node *node;
-    set_elem_item *elem;
-    int cur_depth, i;
-    bool push;
-
-    /* Temporay stack we use to do dfs. Static is ugly but is okay...
-     * This function runs with the cache lock acquired.
-     */
-    static int stack_max = 0;
-    static struct _set_hash_posi {
-        set_hash_node *node;
-        int idx;
-    } *stack = NULL;
-
-    node = info->root;
-    cur_depth = 0;
-    push = true;
-    while (node != NULL) {
-        if (push) {
-            push = false;
-            if (stack_max <= cur_depth) {
-                struct _set_hash_posi *tmp;
-                stack_max += 16;
-                tmp = realloc(stack, sizeof(*stack) * stack_max);
-                assert(tmp != NULL);
-                stack = tmp;
-            }
-            stack[cur_depth].node = node;
-            stack[cur_depth].idx = 0;
-        }
-
-        /* Scan the current node */
-        for (i = stack[cur_depth].idx; i < SET_HASHTAB_SIZE; i++) {
-            if (node->hcnt[i] >= 0) {
-                /* Hash chain.  Insert all elements on the chain into the
-                 * to-be-copied list.
-                 */
-                for (elem = node->htab[i]; elem != NULL; elem = elem->next) {
-                    elem->refcount++;
-                    eresult->elem_array[eresult->elem_count++] = elem;
-                }
-            }
-            else if (node->htab[i] != NULL) {
-                /* Another hash node. Go down */
-                stack[cur_depth].idx = i+1;
-                push = true;
-                node = node->htab[i];
-                cur_depth++;
-                break;
-            }
-        }
-
-        /* Scannned everything in this node. Go up. */
-        if (i >= SET_HASHTAB_SIZE) {
-            cur_depth--;
-            if (cur_depth < 0)
-                node = NULL; /* done */
-            else
-                node = stack[cur_depth].node;
-        }
-    }
+    eresult->elem_count = do_set_elem_get_all(info, false,
+                                              (set_elem_item **)eresult->elem_array);
     assert(eresult->elem_count == info->ccnt);
 }
 
