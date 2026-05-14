@@ -33,6 +33,11 @@
 
 extern int genhash_string_hash(const void *p, size_t nkey);
 
+typedef struct {
+    htree_elem_item **pos;  /* array mode: current write position */
+    htree_elem_item  *tail; /* chain mode: current tail */
+} htree_collect_ctx;
+
 static inline uint32_t htree_hash(htree_ops *ops, const htree_elem_item *elem)
 {
     uint16_t nkey;
@@ -57,6 +62,12 @@ static inline bool htree_key_eq_raw(htree_ops *ops, const htree_elem_item *elem,
     return lnkey == nkey && memcmp(lkey, key, nkey) == 0;
 }
 
+static void collect_to_chain(htree_elem_item *elem, htree_collect_ctx *ctx)
+{
+    ctx->tail->next = elem;
+    ctx->tail = elem;
+}
+
 static htree_node *do_htree_node_alloc(const uint8_t depth, const void *cookie)
 {
     size_t ntotal = sizeof(htree_node);
@@ -72,9 +83,23 @@ static htree_node *do_htree_node_alloc(const uint8_t depth, const void *cookie)
     return node;
 }
 
+static void do_htree_node_free(htree_node *node)
+{
+    do_item_mem_free(node, sizeof(htree_node));
+}
+
 static inline void space_delta_add(ssize_t *delta, ssize_t size)
 {
     if (delta) *delta += size;
+}
+
+static inline bool is_leaf_node(const htree_node *node)
+{
+    for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
+        if (node->hcnt[hidx] == -1)
+            return false;
+    }
+    return true;
 }
 
 /* Split par_node's chain at par_hidx into a new child node:
@@ -110,6 +135,49 @@ static bool do_htree_node_split(htree_node *par_node, const int par_hidx,
     return true;
 }
 
+/* Merge node back into par_node at par_hidx:
+ * transfer node's hash chain back into par_node's slot and free node. */
+static void do_htree_node_merge(htree_node **root_pptr,
+                                htree_node *par_node, const int par_hidx)
+{
+    htree_node *node;
+
+    if (par_node == NULL) { /* removing the root: must already be empty */
+        node = *root_pptr;
+        *root_pptr = NULL;
+        assert(node->tot_elem_cnt == 0);
+        do_htree_node_free(node);
+        return;
+    }
+    /* merge child node's elements back into par_node's hash chain */
+    assert(par_node->hcnt[par_hidx] == -1); /* par_hidx must point to a child node */
+    node = (htree_node *)par_node->htab[par_hidx];
+
+    htree_elem_item *head = NULL;
+    int fcnt = 0;
+    for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
+        assert(node->hcnt[hidx] >= 0); /* child must be a leaf (no grandchildren) */
+        if (node->hcnt[hidx] == 0)
+            continue;
+
+        /* prepend this slot's chain onto head */
+        fcnt += node->hcnt[hidx];
+        while (node->htab[hidx] != NULL) {
+            htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
+            node->htab[hidx] = elem->next;
+            node->hcnt[hidx] -= 1;
+            elem->next = head;
+            head = elem;
+        }
+    }
+    assert(fcnt == (int)node->tot_elem_cnt);
+
+    /* replace the child slot with the collected flat chain */
+    par_node->htab[par_hidx] = head;
+    par_node->hcnt[par_hidx] = fcnt;
+    do_htree_node_free(node);
+}
+
 /* Split the hash chain at *hidx_ptr into a new child node if it is full,
  * updating *node_pptr and *hidx_ptr to point to the insertion slot in the child. */
 static bool do_htree_node_try_split(htree_node **node_pptr,
@@ -133,6 +201,23 @@ static bool do_htree_node_try_split(htree_node **node_pptr,
     return true;
 }
 
+/* Merge child back into par_node if child is empty or too sparse. */
+static void do_htree_node_try_merge(htree_node **root_pptr,
+                                    htree_node *par_node, int par_hidx,
+                                    htree_node *child, ssize_t *delta)
+{
+    if (*root_pptr == NULL) return;
+    /* merge if empty, or if leaf has too few elems (< MAX/2) to keep as a separate node */
+    if (child->tot_elem_cnt == 0 ||
+        (par_node != NULL &&
+         is_leaf_node(child) &&
+         child->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE / 2))) {
+
+        do_htree_node_merge(root_pptr, par_node, par_hidx);
+        space_delta_add(delta, -(ssize_t)slabs_space_size(sizeof(htree_node)));
+    }
+}
+
 static void do_htree_elem_link(htree_node **root_pptr,
                                htree_node *node, const int hidx,
                                htree_elem_item *elem)
@@ -151,6 +236,108 @@ static void do_htree_elem_link(htree_node **root_pptr,
         cur = (htree_node *)cur->htab[cidx];
     }
     node->tot_elem_cnt += 1;
+}
+
+static void do_htree_elem_unlink(htree_node **root_pptr,
+                                 htree_node *node, int hidx,
+                                 htree_elem_item *prev, htree_elem_item *elem)
+{
+    /* remove link from the hash chain */
+    if (prev != NULL) prev->next = elem->next;
+    else              node->htab[hidx] = elem->next;
+
+    node->hcnt[hidx] -= 1;
+    elem->next = NULL;
+
+    /* decrement tot_elem_cnt on every node from root down to the target node */
+    htree_node *cur = *root_pptr;
+    while (cur != node) {
+        cur->tot_elem_cnt -= 1;
+        int cidx = HTREE_GET_HASHIDX(elem->hval, cur->hdepth);
+        assert(cur->hcnt[cidx] == -1);
+        cur = (htree_node *)cur->htab[cidx];
+    }
+    node->tot_elem_cnt -= 1;
+}
+
+/* Skip *skip elems then collect up to *take from a single hash chain.
+ * prev is tracked from the skip phase so unlink can splice at the right point. */
+static uint32_t do_htree_chain_range(htree_node *node, int hidx,
+                                     uint32_t *skip, uint32_t *take,
+                                     bool unlink,
+                                     void (*collect)(htree_elem_item *, htree_collect_ctx *),
+                                     htree_collect_ctx *ctx)
+{
+    assert(*skip < (uint32_t)node->hcnt[hidx]);
+    uint32_t fcnt = 0;
+    htree_elem_item *prev = NULL;
+    htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
+
+    while (*skip > 0) {
+        prev = elem;
+        elem = elem->next;
+        (*skip)--;
+    }
+
+    while (elem != NULL && *take > 0) {
+        htree_elem_item *next = elem->next;
+        collect(elem, ctx);
+        (*take)--;
+        fcnt++;
+        if (unlink) {
+            if (prev != NULL) prev->next = next;
+            else              node->htab[hidx] = next;
+            node->hcnt[hidx]--;
+            node->tot_elem_cnt--;
+            elem->next = NULL;
+        }
+        elem = next;
+    }
+    return fcnt;
+}
+
+/* DFS over the hash tree: skip *skip elems then collect up to *take
+ * via collect_to_array (array output) or collect_to_chain (linked-list output).
+ * collect_to_chain relinks elems via next pointers; must pair with unlink=true. */
+static uint32_t do_htree_range(htree_node **root_pptr,
+                               htree_node *node,
+                               uint32_t *skip, uint32_t *take,
+                               bool unlink,
+                               void (*collect)(htree_elem_item *, htree_collect_ctx *),
+                               htree_collect_ctx *ctx,
+                               ssize_t *htree_space_delta)
+{
+    assert(collect != collect_to_chain || unlink);
+    uint32_t fcnt = 0;
+
+    for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE && *take > 0; hidx++) {
+        bool is_child = (node->hcnt[hidx] == -1);
+        if (!is_child && node->hcnt[hidx] == 0) continue;
+
+        /* skip the entire slot if it falls within the skip range */
+        uint32_t elem_cnt = is_child ? ((htree_node *)node->htab[hidx])->tot_elem_cnt
+                                     : (uint32_t)node->hcnt[hidx];
+        if (*skip >= elem_cnt) {
+            *skip -= elem_cnt;
+            continue;
+        }
+
+        if (is_child) {
+            /* child node: recurse deeper to find elems within the skip/take range */
+            htree_node *child = (htree_node *)node->htab[hidx];
+            uint32_t got = do_htree_range(root_pptr, child, skip, take,
+                                          unlink, collect, ctx, htree_space_delta);
+            if (unlink && got > 0) {
+                do_htree_node_try_merge(root_pptr, node, hidx, child, htree_space_delta);
+                node->tot_elem_cnt -= got;
+            }
+            fcnt += got;
+        } else {
+            /* hash chain: skip remaining offset then collect up to *take elems */
+            fcnt += do_htree_chain_range(node, hidx, skip, take, unlink, collect, ctx);
+        }
+    }
+    return fcnt;
 }
 
 htree_elem_item *htree_elem_find(htree_node *root,
@@ -248,4 +435,69 @@ ENGINE_ERROR_CODE htree_elem_link(htree_node **root_pptr,
 
     do_htree_elem_link(root_pptr, node, hidx, elem);
     return ENGINE_SUCCESS;
+}
+
+htree_elem_item *htree_elem_unlink(htree_node **root_pptr,
+                                   const void *key, uint16_t nkey,
+                                   htree_ops *ops,
+                                   ssize_t *htree_space_delta)
+{
+    if (*root_pptr == NULL) return NULL;
+    if (htree_space_delta) *htree_space_delta = 0;
+
+    uint32_t hval = (uint32_t)genhash_string_hash(key, nkey);
+
+    /* traverse to the leaf node, tracking parent for potential merge */
+    htree_node *par_node = NULL;
+    int par_hidx = 0;
+    htree_node *node = *root_pptr;
+    int hidx;
+    while (true) {
+        hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
+        if (node->hcnt[hidx] >= 0) break;
+        par_node = node;
+        par_hidx = hidx;
+        node = (htree_node *)node->htab[hidx];
+    }
+
+    /* find the element in the hash chain */
+    htree_elem_item *prev = NULL;
+    htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
+    while (elem != NULL) {
+        if (elem->hval == hval && htree_key_eq_raw(ops, elem, key, nkey))
+            break;
+        prev = elem;
+        elem = elem->next;
+    }
+    if (elem == NULL) return NULL;
+
+    do_htree_elem_unlink(root_pptr, node, hidx, prev, elem);
+    do_htree_node_try_merge(root_pptr, par_node, par_hidx, node, htree_space_delta);
+
+    /* returns the unlinked elem for caller post-processing (e.g. CLOG, free). */
+    return elem;
+}
+
+htree_elem_item *htree_elem_unlink_by_cnt(htree_node **root_pptr,
+                                          uint32_t count,
+                                          ssize_t *htree_space_delta)
+{
+    if (*root_pptr == NULL) return NULL;
+    if (htree_space_delta) *htree_space_delta = 0;
+
+    /* count == 0 means "all"; take == 0 when tree is empty */
+    uint32_t actual = (count > 0) ? count : (*root_pptr)->tot_elem_cnt;
+    if (actual == 0) return NULL;
+
+    /* sentinel head: collect_to_chain links the result onto dummy.next */
+    htree_elem_item dummy = {0};
+    uint32_t skip = 0, take = actual;
+    htree_collect_ctx ctx = { .tail = &dummy };
+
+    /* skip 0, unlink `take` elems */
+    do_htree_range(root_pptr, *root_pptr, &skip, &take, true, collect_to_chain, &ctx,
+                   htree_space_delta);
+
+    do_htree_node_try_merge(root_pptr, NULL, 0, *root_pptr, htree_space_delta);
+    return dummy.next;
 }

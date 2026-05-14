@@ -73,4 +73,15 @@ ENGINE_ERROR_CODE htree_elem_link(htree_node **root_pptr,
                                   ssize_t *htree_space_delta,
                                   const void *cookie);
 
+/* unlinks the element matching the given key and returns it.
+ * returns NULL if not found. caller is responsible for CLOG and free. */
+htree_elem_item *htree_elem_unlink(htree_node **root_pptr,
+                                   const void *key, uint16_t nkey,
+                                   htree_ops *ops,
+                                   ssize_t *htree_space_delta);
+
+htree_elem_item *htree_elem_unlink_by_cnt(htree_node **root_pptr,
+                                          uint32_t count,
+                                          ssize_t *htree_space_delta);
+
 #endif
