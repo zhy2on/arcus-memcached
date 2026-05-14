@@ -216,6 +216,64 @@ static uint32_t do_htree_elem_get_by_cnt(htree_node *node, uint32_t count,
     return fcnt;
 }
 
+/* Unlinks and returns the element at logical position `offset` (0-based DFS order).
+ *
+ * Traversal: slots are visited in order (hidx 0..15).
+ *   - hcnt == -1  : child node  — skip if offset falls outside its subtree,
+ *                   otherwise recurse.
+ *   - hcnt >  0   : hash chain  — skip if offset falls outside this chain,
+ *                   otherwise walk to the exact position and unlink.
+ *
+ * tot_elem_cnt propagation: each level decrements its own node->tot_elem_cnt
+ * on the way back up the call stack.  This avoids the need for a root-to-leaf
+ * pass (contrast with do_htree_elem_unlink which walks from root every time). */
+static htree_elem_item *do_htree_elem_unlink_at_offset(htree_node **root_pptr,
+                                                       htree_node *node,
+                                                       uint32_t offset,
+                                                       ssize_t *htree_space_delta)
+{
+    for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
+        if (node->hcnt[hidx] == -1) {
+            htree_node *child_node = (htree_node *)node->htab[hidx];
+            if (offset >= child_node->tot_elem_cnt) {
+                /* target is not in this subtree; skip past it */
+                offset -= child_node->tot_elem_cnt;
+                continue;
+            }
+            htree_elem_item *elem = do_htree_elem_unlink_at_offset(root_pptr, child_node,
+                                                                   offset, htree_space_delta);
+            /* merge child back into this node if it fell below the threshold */
+            if (is_leaf_node(child_node) &&
+                child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE / 2)) {
+                do_htree_node_unlink(root_pptr, node, hidx);
+                space_delta_add(htree_space_delta, -(ssize_t)slabs_space_size(sizeof(htree_node)));
+            }
+            node->tot_elem_cnt -= 1;
+            return elem;
+        } else if (node->hcnt[hidx] > 0) {
+            if (offset >= (uint32_t)node->hcnt[hidx]) {
+                /* target is not in this chain; skip past it */
+                offset -= node->hcnt[hidx];
+                continue;
+            }
+            /* walk to the target position within the chain */
+            htree_elem_item *prev = NULL;
+            htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
+            while (offset-- > 0) {
+                prev = elem;
+                elem = elem->next;
+            }
+            if (prev != NULL) prev->next = elem->next;
+            else              node->htab[hidx] = elem->next;
+            node->hcnt[hidx] -= 1;
+            elem->next = NULL;
+            node->tot_elem_cnt -= 1;
+            return elem;
+        }
+    }
+    return NULL;
+}
+
 static htree_elem_item *do_htree_elem_unlink_by_cnt(htree_node **root_pptr,
                                                     htree_node *node,
                                                     uint32_t count,
@@ -254,6 +312,33 @@ static htree_elem_item *do_htree_elem_unlink_by_cnt(htree_node **root_pptr,
         if (count > 0 && *fcnt >= count) break;
     }
     return cur;
+}
+
+static int do_htree_elem_traverse_sampling(htree_node *node,
+                                           uint32_t remain, uint32_t count,
+                                           htree_elem_item **elem_array)
+{
+    int fcnt = 0;
+    for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
+        if (node->hcnt[hidx] == -1) {
+            htree_node *child_node = (htree_node *)node->htab[hidx];
+            fcnt += do_htree_elem_traverse_sampling(child_node, remain,
+                                                    count - fcnt, &elem_array[fcnt]);
+            remain -= child_node->tot_elem_cnt;
+        } else if (node->hcnt[hidx] > 0) {
+            htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
+            while (elem != NULL) {
+                if ((rand() % remain) < (count - (uint32_t)fcnt)) {
+                    elem_array[fcnt++] = elem;
+                    if ((uint32_t)fcnt >= count) break;
+                }
+                remain -= 1;
+                elem = elem->next;
+            }
+        }
+        if ((uint32_t)fcnt >= count) break;
+    }
+    return fcnt;
 }
 
 htree_elem_item *htree_elem_find(htree_node *root,
@@ -406,6 +491,24 @@ htree_elem_item *htree_elem_unlink(htree_node **root_pptr,
     return elem;
 }
 
+htree_elem_item *htree_elem_unlink_at_offset(htree_node **root_pptr,
+                                             uint32_t offset,
+                                             ssize_t *htree_space_delta)
+{
+    if (*root_pptr == NULL) return NULL;
+    if (htree_space_delta) *htree_space_delta = 0;
+
+    htree_elem_item *elem = do_htree_elem_unlink_at_offset(root_pptr, *root_pptr,
+                                                           offset, htree_space_delta);
+    if (elem == NULL) return NULL;
+
+    if ((*root_pptr) != NULL && (*root_pptr)->tot_elem_cnt == 0) {
+        do_htree_node_unlink(root_pptr, NULL, 0);
+        space_delta_add(htree_space_delta, -(ssize_t)slabs_space_size(sizeof(htree_node)));
+    }
+    return elem;
+}
+
 htree_elem_item *htree_elem_unlink_by_cnt(htree_node **root_pptr,
                                           uint32_t count,
                                           ssize_t *htree_space_delta)
@@ -425,6 +528,29 @@ htree_elem_item *htree_elem_unlink_by_cnt(htree_node **root_pptr,
     return dummy.next;
 }
 
+htree_elem_item *htree_elem_get_at_offset(htree_node *node, uint32_t offset)
+{
+    for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
+        if (node->hcnt[hidx] == -1) {
+            htree_node *child_node = (htree_node *)node->htab[hidx];
+            if (offset >= child_node->tot_elem_cnt) {
+                offset -= child_node->tot_elem_cnt;
+                continue;
+            }
+            return htree_elem_get_at_offset(child_node, offset);
+        } else if (node->hcnt[hidx] > 0) {
+            if (offset >= (uint32_t)node->hcnt[hidx]) {
+                offset -= node->hcnt[hidx];
+                continue;
+            }
+            htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
+            while (offset > 0) { elem = elem->next; offset -= 1; }
+            return elem;
+        }
+    }
+    return NULL;
+}
+
 uint32_t htree_elem_get_by_cnt(htree_node **root_pptr,
                                uint32_t count,
                                htree_elem_item **elem_array,
@@ -441,4 +567,47 @@ uint32_t htree_elem_get_by_cnt(htree_node **root_pptr,
     for (htree_elem_item *f = head; f != NULL; f = f->next)
         elem_array[i++] = f;
     return i;
+}
+
+int htree_elem_get_rand(htree_node *node,
+                        uint32_t total_count, uint32_t count,
+                        htree_elem_item **elem_array)
+{
+    int fcnt = 0;
+
+    if (count <= total_count / 10) {
+        /* sparse: offset dedup hash table */
+        int capacity = (int)(1.3 * (double)count);
+        typedef struct { int cnt; int keys[3]; } _bucket;
+        _bucket *buckets = calloc(capacity, sizeof(_bucket));
+        if (buckets == NULL) return 0;
+        while ((uint32_t)fcnt < count) {
+            int rand_offset = rand() % (int)total_count;
+            int idx = rand_offset % capacity;
+            _bucket *b = &buckets[idx];
+            bool dup = false;
+            for (int i = 0; i < b->cnt; i++) {
+                if (b->keys[i] == rand_offset) { dup = true; break; }
+            }
+            if (!dup && b->cnt < 3) {
+                b->keys[b->cnt++] = rand_offset;
+                htree_elem_item *found = htree_elem_get_at_offset(node, rand_offset);
+                assert(found != NULL);
+                elem_array[fcnt++] = found;
+            }
+        }
+        free(buckets);
+    } else {
+        /* dense: reservoir sampling + Fisher-Yates shuffle */
+        fcnt = do_htree_elem_traverse_sampling(node, total_count, count, elem_array);
+        for (int i = fcnt - 1; i > 0; i--) {
+            int rand_idx = rand() % (i + 1);
+            if (rand_idx != i) {
+                htree_elem_item *tmp = elem_array[i];
+                elem_array[i] = elem_array[rand_idx];
+                elem_array[rand_idx] = tmp;
+            }
+        }
+    }
+    return fcnt;
 }
