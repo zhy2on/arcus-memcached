@@ -62,6 +62,11 @@ static inline bool htree_key_eq_raw(htree_ops *ops, const htree_elem_item *elem,
     return lnkey == nkey && memcmp(lkey, key, nkey) == 0;
 }
 
+static void collect_to_array(htree_elem_item *elem, htree_collect_ctx *ctx)
+{
+    *ctx->pos++ = elem;
+}
+
 static void collect_to_chain(htree_elem_item *elem, htree_collect_ctx *ctx)
 {
     ctx->tail->next = elem;
@@ -500,4 +505,31 @@ htree_elem_item *htree_elem_unlink_by_cnt(htree_node **root_pptr,
 
     do_htree_node_try_merge(root_pptr, NULL, 0, *root_pptr, htree_space_delta);
     return dummy.next;
+}
+
+uint32_t htree_elem_get_by_cnt(htree_node **root_pptr,
+                               uint32_t count,
+                               htree_elem_item **elem_array,
+                               bool unlink,
+                               ssize_t *htree_space_delta)
+{
+    assert(elem_array != NULL);
+    if (*root_pptr == NULL) return 0;
+    if (htree_space_delta) *htree_space_delta = 0;
+
+    /* count == 0 means "all"; take == 0 when tree is empty */
+    uint32_t actual = (count > 0) ? count : (*root_pptr)->tot_elem_cnt;
+    if (actual == 0) return 0;
+
+    uint32_t skip = 0, take = actual;
+    htree_collect_ctx ctx = { .pos = elem_array };
+
+    /* skip 0, collect `take` elems */
+    uint32_t fcnt = do_htree_range(root_pptr, *root_pptr, &skip, &take, unlink,
+                                   collect_to_array, &ctx,
+                                   unlink ? htree_space_delta : NULL);
+
+    if (unlink)
+        do_htree_node_try_merge(root_pptr, NULL, 0, *root_pptr, htree_space_delta);
+    return fcnt;
 }
