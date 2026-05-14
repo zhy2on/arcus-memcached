@@ -72,9 +72,23 @@ static htree_node *do_htree_node_alloc(const uint8_t depth, const void *cookie)
     return node;
 }
 
+static void do_htree_node_free(htree_node *node)
+{
+    do_item_mem_free(node, sizeof(htree_node));
+}
+
 static inline void space_delta_add(ssize_t *delta, ssize_t size)
 {
     if (delta) *delta += size;
+}
+
+static inline bool is_leaf_node(const htree_node *node)
+{
+    for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
+        if (node->hcnt[hidx] == -1)
+            return false;
+    }
+    return true;
 }
 
 static void do_htree_node_link(htree_node *par_node, const int par_hidx,
@@ -97,6 +111,49 @@ static void do_htree_node_link(htree_node *par_node, const int par_hidx,
     par_node->hcnt[par_hidx] = -1;
 }
 
+static void do_htree_node_unlink(htree_node **root_pptr,
+                                 htree_node *par_node, const int par_hidx)
+{
+    htree_node *node;
+
+    if (par_node == NULL) {
+        /* removing the root: must already be empty */
+        node = *root_pptr;
+        *root_pptr = NULL;
+        assert(node->tot_elem_cnt == 0);
+    } else {
+        /* merge child node's elements back into par_node's hash chain */
+        assert(par_node->hcnt[par_hidx] == -1); /* par_hidx must point to a child node */
+
+        node = (htree_node *)par_node->htab[par_hidx];
+
+        htree_elem_item *head = NULL;
+        int fcnt = 0;
+
+        for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
+            assert(node->hcnt[hidx] >= 0); /* child must be a leaf (no grandchildren) */
+            if (node->hcnt[hidx] == 0)
+                continue;
+
+            /* prepend this slot's chain onto head */
+            fcnt += node->hcnt[hidx];
+            while (node->htab[hidx] != NULL) {
+                htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
+                node->htab[hidx] = elem->next;
+                node->hcnt[hidx] -= 1;
+                elem->next = head;
+                head = elem;
+            }
+        }
+        assert(fcnt == (int)node->tot_elem_cnt);
+
+        par_node->htab[par_hidx] = head;
+        par_node->hcnt[par_hidx] = fcnt;
+    }
+
+    do_htree_node_free(node);
+}
+
 static void do_htree_elem_link(htree_node **root_pptr,
                                htree_node *node, const int hidx,
                                htree_elem_item *elem)
@@ -115,6 +172,68 @@ static void do_htree_elem_link(htree_node **root_pptr,
         cur = (htree_node *)cur->htab[cidx];
     }
     node->tot_elem_cnt += 1;
+}
+
+static void do_htree_elem_unlink(htree_node **root_pptr,
+                                 htree_node *node, int hidx,
+                                 htree_elem_item *prev, htree_elem_item *elem)
+{
+    /* remove link from the hash chain */
+    if (prev != NULL) prev->next = elem->next;
+    else              node->htab[hidx] = elem->next;
+
+    node->hcnt[hidx] -= 1;
+    elem->next = NULL;
+
+    /* decrement tot_elem_cnt on every node from root down to the target node */
+    htree_node *cur = *root_pptr;
+    while (cur != node) {
+        cur->tot_elem_cnt -= 1;
+        int cidx = HTREE_GET_HASHIDX(elem->hval, cur->hdepth);
+        assert(cur->hcnt[cidx] == -1);
+        cur = (htree_node *)cur->htab[cidx];
+    }
+    node->tot_elem_cnt -= 1;
+}
+
+static htree_elem_item *do_htree_elem_unlink_by_cnt(htree_node **root_pptr,
+                                                    htree_node *node,
+                                                    uint32_t count,
+                                                    htree_elem_item *cur,
+                                                    uint32_t *fcnt,
+                                                    ssize_t *htree_space_delta)
+{
+    for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
+        if (node->hcnt[hidx] == -1) {
+            htree_node *child_node = (htree_node *)node->htab[hidx];
+            uint32_t rcnt = (count > 0 ? (count - *fcnt) : 0);
+            uint32_t before = *fcnt;
+            cur = do_htree_elem_unlink_by_cnt(root_pptr, child_node, rcnt,
+                                              cur, fcnt, htree_space_delta);
+            node->tot_elem_cnt -= (*fcnt - before);
+            if (is_leaf_node(child_node) &&
+                child_node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE / 2)) {
+                do_htree_node_unlink(root_pptr, node, hidx);
+                space_delta_add(htree_space_delta, -(ssize_t)slabs_space_size(sizeof(htree_node)));
+            }
+        } else if (node->hcnt[hidx] > 0) {
+            htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
+            while (elem != NULL) {
+                htree_elem_item *next = elem->next;
+                node->htab[hidx] = next;
+                node->hcnt[hidx] -= 1;
+                node->tot_elem_cnt -= 1;
+                elem->next = NULL;
+                cur->next = elem;
+                cur = elem;
+                (*fcnt)++;
+                elem = next;
+                if (count > 0 && *fcnt >= count) break;
+            }
+        }
+        if (count > 0 && *fcnt >= count) break;
+    }
+    return cur;
 }
 
 htree_elem_item *htree_elem_find(htree_node *root,
@@ -219,4 +338,69 @@ ENGINE_ERROR_CODE htree_elem_link(htree_node **root_pptr,
     if (new_root)
         space_delta_add(htree_space_delta, (ssize_t)slabs_space_size(sizeof(htree_node)));
     return ENGINE_SUCCESS;
+}
+
+htree_elem_item *htree_elem_unlink(htree_node **root_pptr,
+                                   const void *key, uint16_t nkey,
+                                   htree_ops *ops,
+                                   ssize_t *htree_space_delta)
+{
+    if (*root_pptr == NULL) return NULL;
+    if (htree_space_delta) *htree_space_delta = 0;
+
+    uint32_t hval = (uint32_t)genhash_string_hash(key, nkey);
+
+    /* traverse to the leaf node, tracking parent for potential merge */
+    htree_node *par_node = NULL;
+    int par_hidx = 0;
+    htree_node *node = *root_pptr;
+    int hidx;
+    while (true) {
+        hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
+        if (node->hcnt[hidx] >= 0) break;
+        par_node = node;
+        par_hidx = hidx;
+        node = (htree_node *)node->htab[hidx];
+    }
+
+    /* find the element in the hash chain */
+    htree_elem_item *prev = NULL;
+    htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
+    while (elem != NULL) {
+        if (elem->hval == hval && htree_key_eq_raw(ops, elem, key, nkey))
+            break;
+        prev = elem;
+        elem = elem->next;
+    }
+    if (elem == NULL) return NULL;
+
+    do_htree_elem_unlink(root_pptr, node, hidx, prev, elem);
+
+    /* merge child node into parent if empty or below merge threshold */
+    if (node->tot_elem_cnt == 0 ||
+        (par_node != NULL && is_leaf_node(node) &&
+         node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE / 2))) {
+        do_htree_node_unlink(root_pptr, par_node, par_hidx);
+        space_delta_add(htree_space_delta, -(ssize_t)slabs_space_size(sizeof(htree_node)));
+    }
+    return elem;
+}
+
+htree_elem_item *htree_elem_unlink_by_cnt(htree_node **root_pptr,
+                                          uint32_t count,
+                                          ssize_t *htree_space_delta)
+{
+    if (*root_pptr == NULL) return NULL;
+    if (htree_space_delta) *htree_space_delta = 0;
+
+    htree_elem_item dummy = {0};
+    uint32_t fcnt = 0;
+    do_htree_elem_unlink_by_cnt(root_pptr, *root_pptr, count,
+                                &dummy, &fcnt, htree_space_delta);
+
+    if (*root_pptr != NULL && (*root_pptr)->tot_elem_cnt == 0) {
+        do_htree_node_unlink(root_pptr, NULL, 0);
+        space_delta_add(htree_space_delta, -(ssize_t)slabs_space_size(sizeof(htree_node)));
+    }
+    return dummy.next;
 }
