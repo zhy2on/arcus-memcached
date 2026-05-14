@@ -196,6 +196,26 @@ static void do_htree_elem_unlink(htree_node **root_pptr,
     node->tot_elem_cnt -= 1;
 }
 
+static uint32_t do_htree_elem_get_by_cnt(htree_node *node, uint32_t count,
+                                         htree_elem_item **elem_array, uint32_t fcnt)
+{
+    for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
+        if (node->hcnt[hidx] == -1) {
+            htree_node *child_node = (htree_node *)node->htab[hidx];
+            fcnt = do_htree_elem_get_by_cnt(child_node, count, elem_array, fcnt);
+        } else if (node->hcnt[hidx] > 0) {
+            htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
+            while (elem != NULL) {
+                elem_array[fcnt++] = elem;
+                elem = elem->next;
+                if (count > 0 && fcnt >= count) return fcnt;
+            }
+        }
+        if (count > 0 && fcnt >= count) break;
+    }
+    return fcnt;
+}
+
 static htree_elem_item *do_htree_elem_unlink_by_cnt(htree_node **root_pptr,
                                                     htree_node *node,
                                                     uint32_t count,
@@ -403,4 +423,22 @@ htree_elem_item *htree_elem_unlink_by_cnt(htree_node **root_pptr,
         space_delta_add(htree_space_delta, -(ssize_t)slabs_space_size(sizeof(htree_node)));
     }
     return dummy.next;
+}
+
+uint32_t htree_elem_get_by_cnt(htree_node **root_pptr,
+                               uint32_t count,
+                               htree_elem_item **elem_array,
+                               bool unlink,
+                               ssize_t *htree_space_delta)
+{
+    assert(elem_array != NULL);
+    if (*root_pptr == NULL) return 0;
+
+    if (!unlink) return do_htree_elem_get_by_cnt(*root_pptr, count, elem_array, 0);
+
+    htree_elem_item *head = htree_elem_unlink_by_cnt(root_pptr, count, htree_space_delta);
+    uint32_t i = 0;
+    for (htree_elem_item *f = head; f != NULL; f = f->next)
+        elem_array[i++] = f;
+    return i;
 }
