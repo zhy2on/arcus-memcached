@@ -21,6 +21,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <sys/types.h>
+#include <memcached/engine.h>
 
 #define HTREE_HASHTAB_SIZE 16
 
@@ -46,5 +47,30 @@ typedef struct _htree_node {
 typedef struct {
     const void *(*get_key)(const htree_elem_item *elem, uint16_t *nkey);
 } htree_ops;
+
+/* Position context for hash-tree mutation operations (replace, delete).
+ * Filled by htree_elem_find when the caller needs to mutate the found element. */
+typedef struct {
+    htree_node *node;
+    int hidx;
+    htree_elem_item *prev;
+} htree_elem_pos;
+
+/* Returns the found element, or NULL if not found.
+ * pos is filled only when non-NULL and the element is found. */
+htree_elem_item *htree_elem_find(htree_node *root,
+                                 const void *key, uint16_t nkey,
+                                 htree_ops *ops,
+                                 htree_elem_pos *pos);
+
+void htree_elem_replace_at(htree_elem_pos *pos,
+                           htree_elem_item *old_elem,
+                           htree_elem_item *new_elem);
+
+ENGINE_ERROR_CODE htree_elem_link(htree_node **root_pptr,
+                                  htree_elem_item *elem,
+                                  htree_ops *ops,
+                                  ssize_t *htree_space_delta,
+                                  const void *cookie);
 
 #endif

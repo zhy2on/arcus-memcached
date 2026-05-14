@@ -33,6 +33,7 @@
 
 #include "default_engine.h"
 #include "item_clog.h"
+#include "hash_tree.h"
 
 static struct default_engine *engine=NULL;
 static struct engine_config  *config=NULL; // engine config
@@ -52,15 +53,14 @@ static inline void UNLOCK_CACHE(void)
     pthread_mutex_unlock(&engine->cache_lock);
 }
 
-/*
- * MAP collection manangement
- */
-/* map element previous info internally used */
-typedef struct _map_prev_info {
-    map_hash_node *node;
-    map_elem_item *prev;
-    uint16_t       hidx;
-} map_prev_info;
+static const void *map_get_key(const htree_elem_item *elem, uint16_t *nkey) {
+    *nkey = (uint16_t)((const map_elem_item *)elem)->nfield;
+    return ((const map_elem_item *)elem)->data;
+}
+
+static htree_ops map_htree_ops = {
+    .get_key = map_get_key,
+};
 
 #define MAP_GET_HASHIDX(hval, hdepth) \
         (((hval) & (MAP_HASHIDX_MASK << ((hdepth)*4))) >> ((hdepth)*4))
@@ -140,25 +140,6 @@ static hash_item *do_map_item_alloc(const void *key, const uint32_t nkey,
     return it;
 }
 
-static map_hash_node *do_map_node_alloc(uint8_t hash_depth, const void *cookie)
-{
-    size_t ntotal = sizeof(map_hash_node);
-
-    map_hash_node *node = do_item_mem_alloc(ntotal, LRU_CLSID_FOR_SMALL, cookie);
-    if (node != NULL) {
-        node->slabs_clsid = slabs_clsid(ntotal);
-        assert(node->slabs_clsid > 0);
-
-        node->refcount    = 0;
-        node->hdepth      = hash_depth;
-        node->cur_hash_cnt = 0;
-        node->cur_elem_cnt = 0;
-        memset(node->hcnt, 0, MAP_HASHTAB_SIZE*sizeof(uint16_t));
-        memset(node->htab, 0, MAP_HASHTAB_SIZE*sizeof(void*));
-    }
-    return node;
-}
-
 static void do_map_node_free(map_hash_node *node)
 {
     do_item_mem_free(node, sizeof(map_hash_node));
@@ -197,42 +178,6 @@ static void do_map_elem_release(map_elem_item *elem)
     }
     if (elem->refcount == 0 && elem->status == ELEM_STATUS_UNLINKED) {
         do_map_elem_free(elem);
-    }
-}
-
-static void do_map_node_link(map_meta_info *info,
-                             map_hash_node *par_node, const int par_hidx,
-                             map_hash_node *node)
-{
-    if (par_node == NULL) {
-        info->root = node;
-    } else {
-        map_elem_item *elem;
-        int num_elems = par_node->hcnt[par_hidx];
-        int num_found =0;
-
-        while (par_node->htab[par_hidx] != NULL) {
-            elem = par_node->htab[par_hidx];
-            par_node->htab[par_hidx] = elem->next;
-
-            int hidx = MAP_GET_HASHIDX(elem->hval, node->hdepth);
-            elem->next = node->htab[hidx];
-            node->htab[hidx] = elem;
-            node->hcnt[hidx] += 1;
-            num_found ++;
-        }
-        assert(num_found  == num_elems);
-        node->cur_elem_cnt = num_found ;
-
-        par_node->htab[par_hidx] = node;
-        par_node->hcnt[par_hidx] = -1; /* child hash node */
-        par_node->cur_elem_cnt -= num_found ;
-        par_node->cur_hash_cnt += 1;
-    }
-
-    if (1) { /* apply memory space */
-        size_t stotal = slabs_space_size(sizeof(map_hash_node));
-        do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, stotal);
     }
 }
 
@@ -288,142 +233,62 @@ static void do_map_node_unlink(map_meta_info *info,
     do_map_node_free(node);
 }
 
-static void do_map_elem_replace(map_meta_info *info,
-                                map_prev_info *pinfo, map_elem_item *new_elem)
+static ENGINE_ERROR_CODE do_map_elem_replace_at(map_meta_info *info,
+                                                htree_elem_pos *pos,
+                                                map_elem_item *old_elem,
+                                                map_elem_item *new_elem)
 {
-    map_elem_item *prev = pinfo->prev;
-    map_elem_item *old_elem;
-    size_t old_stotal;
-    size_t new_stotal;
-
-    if (prev != NULL) {
-        old_elem = prev->next;
-    } else {
-        old_elem = (map_elem_item *)pinfo->node->htab[pinfo->hidx];
-    }
-
-    old_stotal = slabs_space_size(do_map_elem_ntotal(old_elem));
-    new_stotal = slabs_space_size(do_map_elem_ntotal(new_elem));
+#ifdef ENABLE_STICKY_ITEM
+    if (IS_STICKY_COLLFLG(info) && do_map_elem_ntotal(old_elem) < do_map_elem_ntotal(new_elem)
+        && do_item_sticky_overflowed())
+        return ENGINE_ENOMEM;
+#endif
+    ssize_t space_delta = (ssize_t)slabs_space_size(do_map_elem_ntotal(new_elem))
+                        - (ssize_t)slabs_space_size(do_map_elem_ntotal(old_elem));
 
     CLOG_MAP_ELEM_INSERT(info, old_elem, new_elem);
 
-    new_elem->next = old_elem->next;
-    if (prev != NULL) {
-        prev->next = new_elem;
-    } else {
-        pinfo->node->htab[pinfo->hidx] = new_elem;
-    }
+    htree_elem_replace_at(pos, (htree_elem_item *)old_elem, (htree_elem_item *)new_elem);
     new_elem->status = ELEM_STATUS_LINKED;
-
     old_elem->status = ELEM_STATUS_UNLINKED;
-    if (old_elem->refcount == 0) {
-        do_map_elem_free(old_elem);
-    }
 
-    if (new_stotal != old_stotal) {
-        assert(info->stotal > 0);
-        if (new_stotal > old_stotal) {
-            do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, (new_stotal-old_stotal));
-        } else {
-            do_coll_space_decr((coll_meta_info *)info, ITEM_TYPE_MAP, (old_stotal-new_stotal));
-        }
-    }
+    if (old_elem->refcount == 0)
+        do_map_elem_free(old_elem);
+
+    do_coll_space_update((coll_meta_info *)info, ITEM_TYPE_MAP, space_delta);
+
+    return ENGINE_SUCCESS;
 }
 
 static ENGINE_ERROR_CODE do_map_elem_link(map_meta_info *info, map_elem_item *elem,
-                                          const bool replace_if_exist, bool *replaced,
                                           const void *cookie)
 {
-    assert(info->root != NULL);
-    map_hash_node *node = info->root;
-    map_elem_item *prev = NULL;
-    map_elem_item *find;
-    map_prev_info pinfo;
-    ENGINE_ERROR_CODE res = ENGINE_SUCCESS;
-
-    int hidx = -1;
-
-    /* map hash value */
-    elem->hval = genhash_string_hash(elem->data, elem->nfield);
-
-    while (node != NULL) {
-        hidx = MAP_GET_HASHIDX(elem->hval, node->hdepth);
-        if (node->hcnt[hidx] >= 0) /* map element hash chain */
-            break;
-        node = node->htab[hidx];
-    }
-    assert(node != NULL);
-    for (find = node->htab[hidx]; find != NULL; find = find->next) {
-        if (map_hash_eq(elem->hval, elem->data, elem->nfield,
-                        find->hval, find->data, find->nfield))
-            break;
-        prev = find;
-    }
-
-    if (find != NULL) {
-        if (replace_if_exist) {
-#ifdef ENABLE_STICKY_ITEM
-            /* sticky memory limit check */
-            if (IS_STICKY_COLLFLG(info)) {
-                if (find->nbytes < elem->nbytes) {
-                    if (do_item_sticky_overflowed())
-                        return ENGINE_ENOMEM;
-                }
-            }
-#endif
-            pinfo.node = node;
-            pinfo.prev = prev;
-            pinfo.hidx = hidx;
-            do_map_elem_replace(info, &pinfo, elem);
-            if (replaced) *replaced = true;
-            return ENGINE_SUCCESS;
-        } else {
-            return ENGINE_ELEM_EEXISTS;
-        }
-    }
-
-#ifdef ENABLE_STICKY_ITEM
-    /* sticky memory limit check */
-    if (IS_STICKY_COLLFLG(info)) {
-        if (do_item_sticky_overflowed())
-            return ENGINE_ENOMEM;
-    }
-#endif
-
-    /* overflow check */
     assert(info->ovflact == OVFL_ERROR);
-    if (info->ccnt >= (info->mcnt > 0 ? info->mcnt : config->max_map_size)) {
+    int real_mcnt = (int)(info->mcnt > 0 ? info->mcnt : config->max_map_size);
+    ssize_t space_delta;
+
+#ifdef ENABLE_STICKY_ITEM
+    if (IS_STICKY_COLLFLG(info) && do_item_sticky_overflowed())
+        return ENGINE_ENOMEM;
+#endif
+    if (real_mcnt > 0 && (int)info->ccnt >= real_mcnt)
         return ENGINE_EOVERFLOW;
-    }
 
-    if (node->hcnt[hidx] >= MAP_MAX_HASHCHAIN_SIZE) {
-        map_hash_node *n_node = do_map_node_alloc(node->hdepth+1, cookie);
-        if (n_node == NULL) {
-            res = ENGINE_ENOMEM;
-            return res;
-        }
-        do_map_node_link(info, node, hidx, n_node);
+    ENGINE_ERROR_CODE ret = htree_elem_link((htree_node **)&info->root,
+                                            (htree_elem_item *)elem,
+                                            &map_htree_ops,
+                                            &space_delta, cookie);
+    if (ret != ENGINE_SUCCESS)
+        return ret;
 
-        node = n_node;
-        hidx = MAP_GET_HASHIDX(elem->hval, node->hdepth);
-    }
-
+    elem->status = ELEM_STATUS_LINKED;
+    space_delta += (ssize_t)slabs_space_size(do_map_elem_ntotal(elem));
     CLOG_MAP_ELEM_INSERT(info, NULL, elem);
 
-    elem->next = node->htab[hidx];
-    node->htab[hidx] = elem;
-    node->hcnt[hidx] += 1;
-    node->cur_elem_cnt += 1;
-    elem->status = ELEM_STATUS_LINKED;
-
     info->ccnt++;
+    do_coll_space_update((coll_meta_info *)info, ITEM_TYPE_MAP, space_delta);
 
-    if (1) { /* apply memory space */
-        size_t stotal = slabs_space_size(do_map_elem_ntotal(elem));
-        do_coll_space_incr((coll_meta_info *)info, ITEM_TYPE_MAP, stotal);
-    }
-
-    return res;
+    return ENGINE_SUCCESS;
 }
 
 static void do_map_elem_unlink(map_meta_info *info,
@@ -555,82 +420,36 @@ static uint32_t do_map_elem_delete_with_field(map_meta_info *info, const int num
     return delcnt;
 }
 
-static map_elem_item *do_map_elem_find(map_hash_node *node, const field_t *field, map_prev_info *pinfo)
-{
-    map_elem_item *elem = NULL;
-    map_elem_item *prev = NULL;
-    int hval = genhash_string_hash(field->value, field->length);
-    int hidx = -1;
-
-    while (node != NULL) {
-        hidx = MAP_GET_HASHIDX(hval, node->hdepth);
-        if (node->hcnt[hidx] >= 0) /* map element hash chain */
-            break;
-        node = node->htab[hidx];
-    }
-    assert(node != NULL);
-    for (elem = node->htab[hidx]; elem != NULL; elem = elem->next) {
-        if (map_hash_eq(hval, field->value, field->length, elem->hval, elem->data, elem->nfield)) {
-            if (pinfo != NULL) {
-                pinfo->node = node;
-                pinfo->prev = prev;
-                pinfo->hidx = hidx;
-            }
-            break;
-        }
-        prev = elem;
-    }
-    return elem;
-}
-
 static ENGINE_ERROR_CODE do_map_elem_update(map_meta_info *info,
                                             const field_t *field, const char *value,
                                             const uint32_t nbytes, const void *cookie)
 {
-    map_prev_info  pinfo;
-    map_elem_item *elem;
-
-    if (info->root == NULL) {
+    htree_elem_pos pos;
+    map_elem_item *old_elem = (map_elem_item *)htree_elem_find((htree_node *)info->root,
+                                                               field->value, field->length,
+                                                               &map_htree_ops, &pos);
+    if (old_elem == NULL)
         return ENGINE_ELEM_ENOENT;
+
+    /* in-place: same size, overwrite value without alloc */
+    if (old_elem->refcount == 0 && old_elem->nbytes == (uint16_t)nbytes) {
+        memcpy(old_elem->data + field->length, value, nbytes);
+        CLOG_MAP_ELEM_INSERT(info, old_elem, old_elem);
+        return ENGINE_SUCCESS;
     }
 
-    elem = do_map_elem_find(info->root, field, &pinfo);
-    if (elem == NULL) {
-        return ENGINE_ELEM_ENOENT;
-    }
+    /* chain-replace: different size or elem in use */
+    map_elem_item *new_elem = do_map_elem_alloc(field->length, nbytes, cookie);
+    if (new_elem == NULL)
+        return ENGINE_ENOMEM;
+    memcpy(new_elem->data, field->value, field->length);
+    memcpy(new_elem->data + field->length, value, nbytes);
 
-    if (elem->refcount == 0 && elem->nbytes == nbytes) {
-        /* old body size == new body size */
-        /* do in-place update */
-        memcpy(elem->data + elem->nfield, value, nbytes);
-        CLOG_MAP_ELEM_INSERT(info, elem, elem);
-    } else {
-        /* old body size != new body size */
-#ifdef ENABLE_STICKY_ITEM
-        /* sticky memory limit check */
-        if (IS_STICKY_COLLFLG(info)) {
-            if (elem->nbytes < nbytes) {
-                if (do_item_sticky_overflowed())
-                    return ENGINE_ENOMEM;
-            }
-        }
-#endif
+    ENGINE_ERROR_CODE ret = do_map_elem_replace_at(info, &pos, old_elem, new_elem);
+    if (ret != ENGINE_SUCCESS)
+        do_map_elem_free(new_elem);
 
-        map_elem_item *new_elem = do_map_elem_alloc(elem->nfield, nbytes, cookie);
-        if (new_elem == NULL) {
-            return ENGINE_ENOMEM;
-        }
-
-        /* build the new element */
-        memcpy(new_elem->data, elem->data, elem->nfield);
-        memcpy(new_elem->data + elem->nfield, value, nbytes);
-        new_elem->hval = elem->hval;
-
-        /* replace the element */
-        do_map_elem_replace(info, &pinfo, new_elem);
-    }
-
-    return ENGINE_SUCCESS;
+    return ret;
 }
 
 static uint32_t do_map_elem_delete(map_meta_info *info, const uint32_t count,
@@ -683,29 +502,22 @@ static ENGINE_ERROR_CODE do_map_elem_insert(hash_item *it, map_elem_item *elem,
                                             const void *cookie)
 {
     map_meta_info *info = (map_meta_info *)item_get_meta(it);
-    ENGINE_ERROR_CODE ret;
 
-    /* create the root hash node if it does not exist */
-    bool new_root_flag = false;
-    if (info->root == NULL) { /* empty map */
-        map_hash_node *r_node = do_map_node_alloc(0, cookie);
-        if (r_node == NULL) {
-            return ENGINE_ENOMEM;
-        }
-        do_map_node_link(info, NULL, 0, r_node);
-        new_root_flag = true;
+    htree_elem_pos pos;
+    map_elem_item *old_elem = (map_elem_item *)htree_elem_find((htree_node *)info->root,
+                                                               elem->data, elem->nfield,
+                                                               &map_htree_ops, &pos);
+    if (old_elem != NULL) {
+        if (!replace_if_exist)
+            return ENGINE_ELEM_EEXISTS;
+        ENGINE_ERROR_CODE ret = do_map_elem_replace_at(info, &pos, old_elem, elem);
+        if (ret != ENGINE_SUCCESS)
+            return ret;
+        if (replaced) *replaced = true;
+        return ENGINE_SUCCESS;
     }
 
-    /* insert the element */
-    ret = do_map_elem_link(info, elem, replace_if_exist, replaced, cookie);
-    if (ret != ENGINE_SUCCESS) {
-        if (new_root_flag) {
-            do_map_node_unlink(info, NULL, 0);
-        }
-        return ret;
-    }
-
-    return ENGINE_SUCCESS;
+    return do_map_elem_link(info, elem, cookie);
 }
 
 /*
