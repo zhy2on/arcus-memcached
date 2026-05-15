@@ -639,12 +639,13 @@ ENGINE_ERROR_CODE map_elem_get(const char *key, const uint32_t nkey,
             if (eresult->elem_array == NULL) {
                 ret = ENGINE_ENOMEM; break;
             }
-            if (numfields == 0)
+            if (numfields == 0) {
                 eresult->elem_count = do_map_elem_get_all(info, delete,
                                                           (map_elem_item **)eresult->elem_array);
-            else
+            } else {
                 eresult->elem_count = do_map_elem_get_by_fields(info, numfields, flist, delete,
                                                                 (map_elem_item **)eresult->elem_array);
+            }
             if (eresult->elem_count > 0) {
                 if (info->ccnt == 0 && drop_if_empty) {
                     assert(delete == true);

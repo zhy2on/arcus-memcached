@@ -495,13 +495,13 @@ ENGINE_ERROR_CODE set_elem_get(const char *key, const uint32_t nkey,
             if (eresult->elem_array == NULL) {
                 ret = ENGINE_ENOMEM; break;
             }
-            bool get_all = (count == 0 || count >= info->ccnt);
-            if (get_all)
+            if (count == 0 || count >= info->ccnt) {
                 eresult->elem_count = do_set_elem_get_all(info, delete,
                                                           (set_elem_item**)(eresult->elem_array));
-            else
+            } else {
                 eresult->elem_count = do_set_elem_get_rand(info, count, delete,
                                                            (set_elem_item**)(eresult->elem_array));
+            }
             if (eresult->elem_count == 0) {
                 free(eresult->elem_array);
                 eresult->elem_array = NULL;

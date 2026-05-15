@@ -602,7 +602,7 @@ int htree_elem_get_rand(htree_node *node,
     } else {
         /* dense: reservoir sampling + Fisher-Yates shuffle */
         fcnt = do_htree_sampling(node, total_count, count, elem_array); /* reservoir sampling */
-        
+
         /* sampling collects elems in DFS order, so shuffle to randomize output order */
         for (int i = fcnt - 1; i > 0; i--) { /* Fisher-Yates shuffle */
             int rand_idx = rand() % (i + 1);
