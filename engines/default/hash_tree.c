@@ -277,8 +277,8 @@ static uint32_t do_htree_chain_range(htree_node *node, int hidx,
     return fcnt;
 }
 
-/* DFS over the hash tree: skip *skip elems, collect up to *take via callback
- * (array: collect_to_array / linked list: collect_to_chain).
+/* DFS over the hash tree: skip *skip elems then collect up to *take
+ * via collect_to_array (array output) or collect_to_chain (linked-list output).
  * collect_to_chain relinks elems via next pointers; must pair with unlink=true. */
 static uint32_t do_htree_range(htree_node **root_pptr,
                                htree_node *node,
@@ -321,6 +321,8 @@ static uint32_t do_htree_range(htree_node **root_pptr,
     return fcnt;
 }
 
+/* DFS over the hash tree: collect count elems by deciding each one randomly.
+ * Each elem is accepted with probability (needed / remain). */
 static int do_htree_sampling(htree_node *node,
                              uint32_t remain, uint32_t count,
                              htree_elem_item **elem_array)
@@ -331,7 +333,7 @@ static int do_htree_sampling(htree_node *node,
             htree_node *child_node = (htree_node *)node->htab[hidx];
             fcnt += do_htree_sampling(child_node, remain,
                                       count - fcnt, &elem_array[fcnt]);
-            remain -= child_node->tot_elem_cnt;
+            remain -= child_node->tot_elem_cnt; /* mark child's elems as seen */
         } else if (node->hcnt[hidx] > 0) {
             htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
             while (elem != NULL) {
@@ -443,6 +445,7 @@ ENGINE_ERROR_CODE htree_elem_link(htree_node **root_pptr,
     do_htree_elem_link(root_pptr, node, hidx, elem);
     if (new_root)
         space_delta_add(htree_space_delta, (ssize_t)slabs_space_size(sizeof(htree_node)));
+
     return ENGINE_SUCCESS;
 }
 
@@ -481,9 +484,9 @@ htree_elem_item *htree_elem_unlink(htree_node **root_pptr,
     if (elem == NULL) return NULL;
 
     do_htree_elem_unlink(root_pptr, node, hidx, prev, elem);
-
     do_htree_node_try_merge(root_pptr, par_node, par_hidx, node, htree_space_delta);
 
+    /* returns the unlinked elem for caller post-processing (e.g. CLOG, free). */
     return elem;
 }
 
@@ -503,6 +506,7 @@ htree_elem_item *htree_elem_unlink_at_offset(htree_node **root_pptr,
     if (*root_pptr == NULL) return NULL;
     if (htree_space_delta) *htree_space_delta = 0;
 
+    /* sentinel head: collect_to_chain links the result onto dummy.next */
     htree_elem_item dummy = {0};
     uint32_t skip = offset, take = 1;
     htree_collect_ctx ctx = { .tail = &dummy };
@@ -527,6 +531,7 @@ htree_elem_item *htree_elem_unlink_by_cnt(htree_node **root_pptr,
     uint32_t actual = (count > 0) ? count : (*root_pptr)->tot_elem_cnt;
     if (actual == 0) return NULL;
 
+    /* sentinel head: collect_to_chain links the result onto dummy.next */
     htree_elem_item dummy = {0};
     uint32_t skip = 0, take = actual;
     htree_collect_ctx ctx = { .tail = &dummy };
@@ -556,8 +561,8 @@ uint32_t htree_elem_get_by_cnt(htree_node **root_pptr,
     uint32_t skip = 0, take = actual;
     htree_collect_ctx ctx = { .pos = elem_array };
     uint32_t fcnt = do_htree_range(root_pptr, *root_pptr, &skip, &take, unlink,
-                                       collect_to_array, &ctx,
-                                       unlink ? htree_space_delta : NULL);
+                                   collect_to_array, &ctx,
+                                   unlink ? htree_space_delta : NULL);
 
     if (unlink && *root_pptr != NULL && (*root_pptr)->tot_elem_cnt == 0) {
         do_htree_node_unlink(root_pptr, NULL, 0);
@@ -596,8 +601,10 @@ int htree_elem_get_rand(htree_node *node,
         free(buckets);
     } else {
         /* dense: reservoir sampling + Fisher-Yates shuffle */
-        fcnt = do_htree_sampling(node, total_count, count, elem_array);
-        for (int i = fcnt - 1; i > 0; i--) {
+        fcnt = do_htree_sampling(node, total_count, count, elem_array); /* reservoir sampling */
+        
+        /* sampling collects elems in DFS order, so shuffle to randomize output order */
+        for (int i = fcnt - 1; i > 0; i--) { /* Fisher-Yates shuffle */
             int rand_idx = rand() % (i + 1);
             if (rand_idx != i) {
                 htree_elem_item *tmp = elem_array[i];
