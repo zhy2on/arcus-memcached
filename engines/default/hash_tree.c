@@ -321,16 +321,16 @@ static uint32_t do_htree_range(htree_node **root_pptr,
     return fcnt;
 }
 
-static int do_htree_elem_traverse_sampling(htree_node *node,
-                                           uint32_t remain, uint32_t count,
-                                           htree_elem_item **elem_array)
+static int do_htree_sampling(htree_node *node,
+                             uint32_t remain, uint32_t count,
+                             htree_elem_item **elem_array)
 {
     int fcnt = 0;
     for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE; hidx++) {
         if (node->hcnt[hidx] == -1) {
             htree_node *child_node = (htree_node *)node->htab[hidx];
-            fcnt += do_htree_elem_traverse_sampling(child_node, remain,
-                                                    count - fcnt, &elem_array[fcnt]);
+            fcnt += do_htree_sampling(child_node, remain,
+                                      count - fcnt, &elem_array[fcnt]);
             remain -= child_node->tot_elem_cnt;
         } else if (node->hcnt[hidx] > 0) {
             htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
@@ -596,7 +596,7 @@ int htree_elem_get_rand(htree_node *node,
         free(buckets);
     } else {
         /* dense: reservoir sampling + Fisher-Yates shuffle */
-        fcnt = do_htree_elem_traverse_sampling(node, total_count, count, elem_array);
+        fcnt = do_htree_sampling(node, total_count, count, elem_array);
         for (int i = fcnt - 1; i > 0; i--) {
             int rand_idx = rand() % (i + 1);
             if (rand_idx != i) {
