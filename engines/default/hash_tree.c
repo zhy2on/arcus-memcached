@@ -33,6 +33,11 @@
 
 extern int genhash_string_hash(const void *p, size_t nkey);
 
+typedef struct {
+    htree_elem_item **pos;  /* array mode: current write position */
+    htree_elem_item  *tail; /* chain mode: current tail */
+} htree_collect_ctx;
+
 static inline uint32_t htree_hash(htree_ops *ops, const htree_elem_item *elem)
 {
     uint16_t nkey;
@@ -55,6 +60,17 @@ static inline bool htree_key_eq_raw(htree_ops *ops, const htree_elem_item *elem,
     uint16_t lnkey;
     const void *lkey = ops->get_key(elem, &lnkey);
     return lnkey == nkey && memcmp(lkey, key, nkey) == 0;
+}
+
+static void collect_to_array(htree_elem_item *elem, htree_collect_ctx *ctx)
+{
+    *ctx->pos++ = elem;
+}
+
+static void collect_to_chain(htree_elem_item *elem, htree_collect_ctx *ctx)
+{
+    ctx->tail->next = elem;
+    ctx->tail = elem;
 }
 
 static htree_node *do_htree_node_alloc(const uint8_t depth, const void *cookie)
@@ -154,6 +170,36 @@ static void do_htree_node_unlink(htree_node **root_pptr,
     do_htree_node_free(node);
 }
 
+static bool do_htree_node_try_split(htree_node **node_pptr,
+                                    int *hidx_ptr, uint32_t hval,
+                                    ssize_t *delta, const void *cookie)
+{
+    htree_node *node = *node_pptr;
+    int hidx = *hidx_ptr;
+    if (node->hcnt[hidx] < HTREE_MAX_HASHCHAIN_SIZE)
+        return true;
+    htree_node *n_node = do_htree_node_alloc(node->hdepth + 1, cookie);
+    if (n_node == NULL)
+        return false;
+    do_htree_node_link(node, hidx, n_node);
+    space_delta_add(delta, (ssize_t)slabs_space_size(sizeof(htree_node)));
+    *node_pptr = n_node;
+    *hidx_ptr = HTREE_GET_HASHIDX(hval, n_node->hdepth);
+    return true;
+}
+
+static void do_htree_node_try_merge(htree_node **root_pptr,
+                                    htree_node *par_node, int par_hidx,
+                                    htree_node *child, ssize_t *delta)
+{
+    if (child->tot_elem_cnt == 0 ||
+        (par_node != NULL && is_leaf_node(child) &&
+         child->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE / 2))) {
+        do_htree_node_unlink(root_pptr, par_node, par_hidx);
+        space_delta_add(delta, -(ssize_t)slabs_space_size(sizeof(htree_node)));
+    }
+}
+
 static void do_htree_elem_link(htree_node **root_pptr,
                                htree_node *node, const int hidx,
                                htree_elem_item *elem)
@@ -196,161 +242,83 @@ static void do_htree_elem_unlink(htree_node **root_pptr,
     node->tot_elem_cnt -= 1;
 }
 
-/* DFS traversal — skip *skip elements, collect up to *take into elem_array.
- * *skip and *take are updated in place across recursive calls.
- * If unlink=true, collected elements are spliced out and tot_elem_cnt is
- * decremented bottom-up (each level decrements by the count removed in its subtree).
- *
- * Handles all get/unlink-with-array-output paths:
- *   get_at_offset(off)    → skip=off, take=1,   unlink=false
- *   unlink_at_offset(off) → skip=off, take=1,   unlink=true
- *   get_by_cnt(cnt)       → skip=0,   take=cnt, unlink=false/true */
-static uint32_t do_htree_dfs_range_array(htree_node **root_pptr,
-                                         htree_node *node,
-                                         uint32_t *skip,
-                                         uint32_t *take,
-                                         bool unlink,
-                                         htree_elem_item **elem_array,
-                                         ssize_t *htree_space_delta)
+/* Skip *skip elems then collect up to *take from a single hash chain.
+ * prev is tracked from the skip phase so unlink can splice at the right point. */
+static uint32_t do_htree_chain_range(htree_node *node, int hidx,
+                                     uint32_t *skip, uint32_t *take,
+                                     bool unlink,
+                                     void (*collect)(htree_elem_item *, htree_collect_ctx *),
+                                     htree_collect_ctx *ctx)
 {
     uint32_t fcnt = 0;
+    htree_elem_item *prev = NULL;
+    htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
 
-    for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE && *take > 0; hidx++) {
-        if (node->hcnt[hidx] == -1) {
-            htree_node *child = (htree_node *)node->htab[hidx];
-            uint32_t child_cnt = child->tot_elem_cnt;
+    for (uint32_t i = 0; i < *skip; i++) {
+        prev = elem;
+        elem = elem->next;
+    }
+    *skip = 0;
 
-            if (*skip >= child_cnt) {
-                *skip -= child_cnt;
-                continue;
-            }
-
-            uint32_t got = do_htree_dfs_range_array(root_pptr, child, skip, take,
-                                                    unlink, elem_array + fcnt,
-                                                    htree_space_delta);
-            if (unlink && got > 0) {
-                if (is_leaf_node(child) &&
-                    child->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE / 2)) {
-                    do_htree_node_unlink(root_pptr, node, hidx);
-                    space_delta_add(htree_space_delta, -(ssize_t)slabs_space_size(sizeof(htree_node)));
-                }
-                node->tot_elem_cnt -= got;
-            }
-            fcnt += got;
-
-        } else if (node->hcnt[hidx] > 0) {
-            uint32_t chain_cnt = (uint32_t)node->hcnt[hidx];
-
-            if (*skip >= chain_cnt) {
-                *skip -= chain_cnt;
-                continue;
-            }
-
-            htree_elem_item *prev = NULL;
-            htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
-
-            /* advance to the skip offset — track prev for unlink splicing */
-            for (uint32_t i = 0; i < *skip; i++) {
-                prev = elem;
-                elem = elem->next;
-            }
-            *skip = 0;
-
-            while (elem != NULL && *take > 0) {
-                htree_elem_item *next = elem->next;
-                elem_array[fcnt++] = elem;
-                (*take)--;
-                if (unlink) {
-                    if (prev != NULL) prev->next = next;
-                    else              node->htab[hidx] = next;
-                    node->hcnt[hidx]--;
-                    node->tot_elem_cnt--;
-                    elem->next = NULL;
-                    /* prev stays fixed — each removal splices at the same point */
-                } else {
-                    prev = elem;
-                }
-                elem = next;
-            }
+    while (elem != NULL && *take > 0) {
+        htree_elem_item *next = elem->next;
+        collect(elem, ctx);
+        (*take)--;
+        fcnt++;
+        if (unlink) {
+            if (prev != NULL) prev->next = next;
+            else              node->htab[hidx] = next;
+            node->hcnt[hidx]--;
+            node->tot_elem_cnt--;
+            elem->next = NULL;
         }
+        elem = next;
     }
     return fcnt;
 }
 
-/* DFS traversal for unlink with linked-list output.
- * Symmetric with do_htree_dfs_range_array: identical skip/take/node-merge logic.
- * Only difference: output is chained via ->next (cur->next = elem; cur = elem)
- * instead of written to elem_array.  Always unlinks; returns the new chain tail.
- *
- * Caller sets up a dummy head and passes &dummy as cur:
- *   dummy → e1 → e2 → ... → eN → NULL  (no allocation needed).
- *
- * Used by unlink_at_offset and unlink_by_cnt which both return a linked list. */
-static htree_elem_item *do_htree_dfs_range_chain(htree_node **root_pptr,
-                                                  htree_node *node,
-                                                  uint32_t *skip,
-                                                  uint32_t *take,
-                                                  htree_elem_item *cur,
-                                                  ssize_t *htree_space_delta)
+/* DFS over the hash tree: skip *skip elems, collect up to *take via callback
+ * (array: collect_to_array / linked list: collect_to_chain).
+ * collect_to_chain relinks elems via next pointers; must pair with unlink=true. */
+static uint32_t do_htree_range(htree_node **root_pptr,
+                               htree_node *node,
+                               uint32_t *skip, uint32_t *take,
+                               bool unlink,
+                               void (*collect)(htree_elem_item *, htree_collect_ctx *),
+                               htree_collect_ctx *ctx,
+                               ssize_t *htree_space_delta)
 {
+    assert(collect != collect_to_chain || unlink);
+    uint32_t fcnt = 0;
+
     for (int hidx = 0; hidx < HTREE_HASHTAB_SIZE && *take > 0; hidx++) {
-        if (node->hcnt[hidx] == -1) {
+        bool is_child = (node->hcnt[hidx] == -1);
+        if (!is_child && node->hcnt[hidx] == 0) continue;
+
+        /* skip the entire slot if it falls within the skip range */
+        uint32_t elem_cnt = is_child ? ((htree_node *)node->htab[hidx])->tot_elem_cnt
+                                     : (uint32_t)node->hcnt[hidx];
+        if (*skip >= elem_cnt) {
+            *skip -= elem_cnt;
+            continue;
+        }
+
+        if (is_child) {
+            /* child node: recurse deeper to find elems within the skip/take range */
             htree_node *child = (htree_node *)node->htab[hidx];
-            uint32_t child_cnt = child->tot_elem_cnt;
-
-            if (*skip >= child_cnt) {
-                *skip -= child_cnt;
-                continue;
-            }
-
-            uint32_t take_before = *take;
-            cur = do_htree_dfs_range_chain(root_pptr, child, skip, take, cur, htree_space_delta);
-            uint32_t got = take_before - *take;
-            if (got > 0) {
-                if (is_leaf_node(child) &&
-                    child->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE / 2)) {
-                    do_htree_node_unlink(root_pptr, node, hidx);
-                    space_delta_add(htree_space_delta, -(ssize_t)slabs_space_size(sizeof(htree_node)));
-                }
+            uint32_t got = do_htree_range(root_pptr, child, skip, take,
+                                          unlink, collect, ctx, htree_space_delta);
+            if (unlink && got > 0) {
+                do_htree_node_try_merge(root_pptr, node, hidx, child, htree_space_delta);
                 node->tot_elem_cnt -= got;
             }
-
-        } else if (node->hcnt[hidx] > 0) {
-            uint32_t chain_cnt = (uint32_t)node->hcnt[hidx];
-
-            if (*skip >= chain_cnt) {
-                *skip -= chain_cnt;
-                continue;
-            }
-
-            htree_elem_item *prev = NULL;
-            htree_elem_item *elem = (htree_elem_item *)node->htab[hidx];
-
-            /* advance to the skip offset — track prev for splicing */
-            for (uint32_t i = 0; i < *skip; i++) {
-                prev = elem;
-                elem = elem->next;
-            }
-            *skip = 0;
-
-            while (elem != NULL && *take > 0) {
-                htree_elem_item *next = elem->next;
-                /* chain output (array version: elem_array[fcnt++] = elem) */
-                cur->next = elem;
-                cur = elem;
-                (*take)--;
-                /* always unlink */
-                if (prev != NULL) prev->next = next;
-                else              node->htab[hidx] = next;
-                node->hcnt[hidx]--;
-                node->tot_elem_cnt--;
-                elem->next = NULL;
-                /* prev stays fixed — each removal splices at the same point */
-                elem = next;
-            }
+            fcnt += got;
+        } else {
+            /* hash chain: skip remaining offset then collect up to *take elems */
+            fcnt += do_htree_chain_range(node, hidx, skip, take, unlink, collect, ctx);
         }
     }
-    return cur;
+    return fcnt;
 }
 
 static int do_htree_elem_traverse_sampling(htree_node *node,
@@ -468,15 +436,9 @@ ENGINE_ERROR_CODE htree_elem_link(htree_node **root_pptr,
     }
 
     /* split the hash chain into a new child node if it is full */
-    if (node->hcnt[hidx] >= HTREE_MAX_HASHCHAIN_SIZE) {
-        htree_node *n_node = do_htree_node_alloc(node->hdepth + 1, cookie);
-        if (n_node == NULL)
-            return ENGINE_ENOMEM;
-        do_htree_node_link(node, hidx, n_node);
-        space_delta_add(htree_space_delta, (ssize_t)slabs_space_size(sizeof(htree_node)));
-        node = n_node;
-        hidx = HTREE_GET_HASHIDX(elem->hval, node->hdepth);
-    }
+    if (!do_htree_node_try_split(&node, &hidx, elem->hval,
+                                 htree_space_delta, cookie))
+        return ENGINE_ENOMEM;
 
     do_htree_elem_link(root_pptr, node, hidx, elem);
     if (new_root)
@@ -520,13 +482,8 @@ htree_elem_item *htree_elem_unlink(htree_node **root_pptr,
 
     do_htree_elem_unlink(root_pptr, node, hidx, prev, elem);
 
-    /* merge child node into parent if empty or below merge threshold */
-    if (node->tot_elem_cnt == 0 ||
-        (par_node != NULL && is_leaf_node(node) &&
-         node->tot_elem_cnt < (HTREE_MAX_HASHCHAIN_SIZE / 2))) {
-        do_htree_node_unlink(root_pptr, par_node, par_hidx);
-        space_delta_add(htree_space_delta, -(ssize_t)slabs_space_size(sizeof(htree_node)));
-    }
+    do_htree_node_try_merge(root_pptr, par_node, par_hidx, node, htree_space_delta);
+
     return elem;
 }
 
@@ -534,7 +491,8 @@ htree_elem_item *htree_elem_get_at_offset(htree_node *node, uint32_t offset)
 {
     htree_elem_item *elem = NULL;
     uint32_t skip = offset, take = 1;
-    do_htree_dfs_range_array(&node, node, &skip, &take, false, &elem, NULL);
+    htree_collect_ctx ctx = { .pos = &elem };
+    do_htree_range(&node, node, &skip, &take, false, collect_to_array, &ctx, NULL);
     return elem;
 }
 
@@ -547,7 +505,9 @@ htree_elem_item *htree_elem_unlink_at_offset(htree_node **root_pptr,
 
     htree_elem_item dummy = {0};
     uint32_t skip = offset, take = 1;
-    do_htree_dfs_range_chain(root_pptr, *root_pptr, &skip, &take, &dummy, htree_space_delta);
+    htree_collect_ctx ctx = { .tail = &dummy };
+    do_htree_range(root_pptr, *root_pptr, &skip, &take, true, collect_to_chain, &ctx,
+                       htree_space_delta);
     if (dummy.next == NULL) return NULL;
 
     if (*root_pptr != NULL && (*root_pptr)->tot_elem_cnt == 0) {
@@ -569,7 +529,9 @@ htree_elem_item *htree_elem_unlink_by_cnt(htree_node **root_pptr,
 
     htree_elem_item dummy = {0};
     uint32_t skip = 0, take = actual;
-    do_htree_dfs_range_chain(root_pptr, *root_pptr, &skip, &take, &dummy, htree_space_delta);
+    htree_collect_ctx ctx = { .tail = &dummy };
+    do_htree_range(root_pptr, *root_pptr, &skip, &take, true, collect_to_chain, &ctx,
+                       htree_space_delta);
 
     if (*root_pptr != NULL && (*root_pptr)->tot_elem_cnt == 0) {
         do_htree_node_unlink(root_pptr, NULL, 0);
@@ -586,13 +548,16 @@ uint32_t htree_elem_get_by_cnt(htree_node **root_pptr,
 {
     assert(elem_array != NULL);
     if (*root_pptr == NULL) return 0;
+
     uint32_t actual = (count > 0) ? count : (*root_pptr)->tot_elem_cnt;
     if (actual == 0) return 0;
-    if (htree_space_delta) *htree_space_delta = 0;
 
+    if (htree_space_delta) *htree_space_delta = 0;
     uint32_t skip = 0, take = actual;
-    uint32_t fcnt = do_htree_dfs_range_array(root_pptr, *root_pptr, &skip, &take, unlink,
-                                             elem_array, unlink ? htree_space_delta : NULL);
+    htree_collect_ctx ctx = { .pos = elem_array };
+    uint32_t fcnt = do_htree_range(root_pptr, *root_pptr, &skip, &take, unlink,
+                                       collect_to_array, &ctx,
+                                       unlink ? htree_space_delta : NULL);
 
     if (unlink && *root_pptr != NULL && (*root_pptr)->tot_elem_cnt == 0) {
         do_htree_node_unlink(root_pptr, NULL, 0);
