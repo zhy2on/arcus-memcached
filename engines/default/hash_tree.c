@@ -250,9 +250,8 @@ static void do_htree_elem_unlink(htree_node *root,
     /* remove link from the hash chain */
     if (prev != NULL) prev->next = elem->next;
     else              node->htab[hidx] = elem->next;
-
-    node->hcnt[hidx] -= 1;
     elem->next = NULL;
+    node->hcnt[hidx] -= 1;
 
     /* decrement tot_elem_cnt on every node from root down to the target node */
     htree_node *cur = root;
