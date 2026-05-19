@@ -90,8 +90,6 @@ htree_elem_item *htree_elem_unlink_by_cnt(htree_node **root_pptr,
                                           uint32_t count,
                                           ssize_t *htree_space_delta);
 
-htree_elem_item *htree_elem_get_at_offset(htree_node *node, uint32_t offset);
-
 uint32_t htree_elem_get_by_cnt(htree_node **root_pptr,
                                uint32_t count,
                                htree_elem_item **elem_array,

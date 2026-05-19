@@ -373,6 +373,18 @@ static int do_htree_sampling(htree_node *node,
     return fcnt;
 }
 
+static htree_elem_item *do_htree_elem_get_at_offset(htree_node *node, uint32_t offset)
+{
+    /* acts as a 1-elem array for collect_to_array */
+    htree_elem_item *elem = NULL;
+    uint32_t skip = offset, take = 1;
+    htree_collect_ctx ctx = { .pos = &elem };
+
+    /* skip `offset`, read 1 */
+    do_htree_range(&node, node, &skip, &take, false, collect_to_array, &ctx, NULL);
+    return elem;
+}
+
 htree_elem_item *htree_elem_find(htree_node *root,
                                  const void *key, uint16_t nkey,
                                  htree_ops *ops,
@@ -512,18 +524,6 @@ htree_elem_item *htree_elem_unlink(htree_node **root_pptr,
     return elem;
 }
 
-htree_elem_item *htree_elem_get_at_offset(htree_node *node, uint32_t offset)
-{
-    /* acts as a 1-elem array for collect_to_array */
-    htree_elem_item *elem = NULL;
-    uint32_t skip = offset, take = 1;
-    htree_collect_ctx ctx = { .pos = &elem };
-
-    /* skip `offset`, read 1 */
-    do_htree_range(&node, node, &skip, &take, false, collect_to_array, &ctx, NULL);
-    return elem;
-}
-
 htree_elem_item *htree_elem_unlink_at_offset(htree_node **root_pptr,
                                              uint32_t offset,
                                              ssize_t *htree_space_delta)
@@ -621,7 +621,7 @@ int htree_elem_get_rand(htree_node *node,
             }
             if (!dup && b->cnt < 3) {
                 b->keys[b->cnt++] = rand_offset;
-                htree_elem_item *found = htree_elem_get_at_offset(node, rand_offset);
+                htree_elem_item *found = do_htree_elem_get_at_offset(node, rand_offset);
                 assert(found != NULL);
                 elem_array[fcnt++] = found;
             }
