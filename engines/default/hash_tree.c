@@ -382,19 +382,19 @@ htree_elem_item *htree_elem_find(htree_node *root,
         return NULL;
 
     uint32_t hval = (uint32_t)genhash_string_hash(key, nkey);
-    htree_node *node = root;
-    htree_elem_item *prev = NULL;
-    int hidx = -1;
 
-    while (node != NULL) {
+    htree_node *node = root;
+    int hidx;
+    while (true) {
         hidx = HTREE_GET_HASHIDX(hval, node->hdepth);
         if (node->hcnt[hidx] >= 0)
             break;
         node = (htree_node *)node->htab[hidx];
     }
-    assert(node != NULL && hidx != -1);
+    if (node->hcnt[hidx] == 0) return NULL;
 
     htree_elem_item *find;
+    htree_elem_item *prev = NULL;
     for (find = (htree_elem_item *)node->htab[hidx];
          find != NULL;
          find = find->next) {
