@@ -223,7 +223,7 @@ static void do_htree_node_try_merge(htree_node **root_pptr,
     }
 }
 
-static void do_htree_elem_link(htree_node **root_pptr,
+static void do_htree_elem_link(htree_node *root,
                                htree_node *node, const int hidx,
                                htree_elem_item *elem)
 {
@@ -233,7 +233,7 @@ static void do_htree_elem_link(htree_node **root_pptr,
     node->hcnt[hidx] += 1;
 
     /* increment tot_elem_cnt on every node from root down to the target node */
-    htree_node *cur = *root_pptr;
+    htree_node *cur = root;
     while (cur != node) {
         cur->tot_elem_cnt += 1;
         int cidx = HTREE_GET_HASHIDX(elem->hval, cur->hdepth);
@@ -243,7 +243,7 @@ static void do_htree_elem_link(htree_node **root_pptr,
     node->tot_elem_cnt += 1;
 }
 
-static void do_htree_elem_unlink(htree_node **root_pptr,
+static void do_htree_elem_unlink(htree_node *root,
                                  htree_node *node, int hidx,
                                  htree_elem_item *prev, htree_elem_item *elem)
 {
@@ -255,7 +255,7 @@ static void do_htree_elem_unlink(htree_node **root_pptr,
     elem->next = NULL;
 
     /* decrement tot_elem_cnt on every node from root down to the target node */
-    htree_node *cur = *root_pptr;
+    htree_node *cur = root;
     while (cur != node) {
         cur->tot_elem_cnt -= 1;
         int cidx = HTREE_GET_HASHIDX(elem->hval, cur->hdepth);
@@ -435,13 +435,12 @@ ENGINE_ERROR_CODE htree_elem_link(htree_node **root_pptr,
 
     /* allocate root node if the tree is empty */
     if (*root_pptr == NULL) {
-        htree_node *root = do_htree_node_alloc(0, cookie);
-        if (root == NULL)
+        *root_pptr = do_htree_node_alloc(0, cookie);
+        if (*root_pptr == NULL)
             return ENGINE_ENOMEM;
-        *root_pptr = root;
         space_delta_add(htree_space_delta, (ssize_t)slabs_space_size(sizeof(htree_node)));
         int hidx = HTREE_GET_HASHIDX(elem->hval, 0);
-        do_htree_elem_link(root_pptr, root, hidx, elem);
+        do_htree_elem_link(*root_pptr, *root_pptr, hidx, elem);
         return ENGINE_SUCCESS;
     }
 
@@ -467,7 +466,7 @@ ENGINE_ERROR_CODE htree_elem_link(htree_node **root_pptr,
                                  htree_space_delta, cookie))
         return ENGINE_ENOMEM;
 
-    do_htree_elem_link(root_pptr, node, hidx, elem);
+    do_htree_elem_link(*root_pptr, node, hidx, elem);
     return ENGINE_SUCCESS;
 }
 
@@ -505,7 +504,7 @@ htree_elem_item *htree_elem_unlink(htree_node **root_pptr,
     }
     if (elem == NULL) return NULL;
 
-    do_htree_elem_unlink(root_pptr, node, hidx, prev, elem);
+    do_htree_elem_unlink(*root_pptr, node, hidx, prev, elem);
     do_htree_node_try_merge(root_pptr, par_node, par_hidx, node, htree_space_delta);
 
     /* returns the unlinked elem for caller post-processing (e.g. CLOG, free). */
