@@ -429,7 +429,8 @@ ENGINE_ERROR_CODE htree_elem_link(htree_node **root_pptr,
                                   ssize_t *htree_space_delta,
                                   const void *cookie)
 {
-    if (htree_space_delta) *htree_space_delta = 0;
+    assert(htree_space_delta != NULL);
+    *htree_space_delta = 0;
     elem->hval = htree_hash(ops, elem);
 
     /* allocate root node if the tree is empty */
@@ -475,7 +476,8 @@ htree_elem_item *htree_elem_unlink(htree_node **root_pptr,
                                    ssize_t *htree_space_delta)
 {
     if (*root_pptr == NULL) return NULL;
-    if (htree_space_delta) *htree_space_delta = 0;
+    assert(htree_space_delta != NULL);
+    *htree_space_delta = 0;
 
     uint32_t hval = (uint32_t)genhash_string_hash(key, nkey);
 
@@ -527,7 +529,8 @@ htree_elem_item *htree_elem_unlink_at_offset(htree_node **root_pptr,
                                              ssize_t *htree_space_delta)
 {
     if (*root_pptr == NULL) return NULL;
-    if (htree_space_delta) *htree_space_delta = 0;
+    assert(htree_space_delta != NULL);
+    *htree_space_delta = 0;
 
     /* sentinel head: collect_to_chain links the result onto dummy.next */
     htree_elem_item dummy = {0};
@@ -574,6 +577,8 @@ uint32_t htree_elem_get_by_cnt(htree_node **root_pptr,
                                ssize_t *htree_space_delta)
 {
     assert(elem_array != NULL);
+    assert(!unlink || htree_space_delta != NULL);
+
     if (*root_pptr == NULL) return 0;
     if (htree_space_delta) *htree_space_delta = 0;
 
