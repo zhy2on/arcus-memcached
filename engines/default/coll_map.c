@@ -432,17 +432,18 @@ static ENGINE_ERROR_CODE do_map_elem_insert(hash_item *it, map_elem_item *elem,
     map_elem_item *old_elem = (map_elem_item *)htree_elem_find((htree_node *)info->root,
                                                                elem->data, elem->nfield,
                                                                &map_htree_ops, &pos);
-    if (old_elem != NULL) {
-        if (!replace_if_exist)
-            return ENGINE_ELEM_EEXISTS;
-        ENGINE_ERROR_CODE ret = do_map_elem_replace_at(info, &pos, old_elem, elem);
-        if (ret != ENGINE_SUCCESS)
-            return ret;
-        if (replaced) *replaced = true;
-        return ENGINE_SUCCESS;
-    }
 
-    return do_map_elem_link(info, elem, cookie);
+    if (replaced) *replaced = false;
+
+    if (old_elem == NULL)
+        return do_map_elem_link(info, elem, cookie);
+
+    if (!replace_if_exist)
+        return ENGINE_ELEM_EEXISTS;
+
+    ENGINE_ERROR_CODE ret = do_map_elem_replace_at(info, &pos, old_elem, elem);
+    if (ret == ENGINE_SUCCESS && replaced) *replaced = true;
+    return ret;
 }
 
 /*
@@ -516,7 +517,6 @@ ENGINE_ERROR_CODE map_elem_insert(const char *key, const uint32_t nkey,
     PERSISTENCE_ACTION_BEGIN(cookie, UPD_MAP_ELEM_INSERT);
 
     *created = false;
-    *replaced = false;
 
     LOCK_CACHE();
     ret = do_map_item_find(key, nkey, DONT_UPDATE, &it);
