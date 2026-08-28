@@ -17,6 +17,7 @@
  * limitations under the License.
  */
 #include "config.h"
+#include "cmp_ops.h"
 #include <fcntl.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -362,190 +363,11 @@ static inline btree_indx_node *do_btree_get_last_leaf(btree_indx_node *node,
     return node;
 }
 
-static inline void do_btree_copy_bkey(btree_elem_item *elem, bkey_t *bkey)
-{
-    if (elem->nbkey > 0) {
-        bkey->len = elem->nbkey;
-        memcpy(bkey->val, elem->data, elem->nbkey);
-    } else {
-        bkey->len = 0;
-        memcpy(bkey->val, elem->data, sizeof(uint64_t));
-    }
-}
-
 /******************* BKEY COMPARISION CODE *************************/
-static inline int UINT64_COMP(const uint64_t *v1, const uint64_t *v2)
-{
-    if (*v1 == *v2) return  0;
-    if (*v1 <  *v2) return -1;
-    else            return  1;
-}
-
-static inline bool UINT64_ISEQ(const uint64_t *v1, const uint64_t *v2)
-{
-    return ((*v1 == *v2) ? true : false);
-}
-
-static inline bool UINT64_ISNE(const uint64_t *v1, const uint64_t *v2)
-{
-    return ((*v1 != *v2) ? true : false);
-}
-
-static inline bool UINT64_ISLT(const uint64_t *v1, const uint64_t *v2)
-{
-    return ((*v1 <  *v2) ? true : false);
-}
-
-static inline bool UINT64_ISLE(const uint64_t *v1, const uint64_t *v2)
-{
-    return ((*v1 <= *v2) ? true : false);
-}
-
-static inline bool UINT64_ISGT(const uint64_t *v1, const uint64_t *v2)
-{
-    return ((*v1 >  *v2) ? true : false);
-}
-
-static inline bool UINT64_ISGE(const uint64_t *v1, const uint64_t *v2)
-{
-    return ((*v1 >= *v2) ? true : false);
-}
-
-static inline int BINARY_COMP(const unsigned char *v1, const int nv1,
-                              const unsigned char *v2, const int nv2)
-{
-    assert(nv1 > 0 && nv2 > 0);
-    int min_nv = (nv1 < nv2 ? nv1 : nv2);
-    for (int i=0; i < min_nv; i++) {
-        if (v1[i] == v2[i]) continue;
-        if (v1[i] <  v2[i]) return -1;
-        else                return  1;
-    }
-    if (nv1 == nv2) return  0;
-    if (nv1 <  nv2) return -1;
-    else            return  1;
-}
-
-static inline bool BINARY_ISEQ(const unsigned char *v1, const int nv1,
-                               const unsigned char *v2, const int nv2)
-{
-    assert(nv1 > 0 && nv2 > 0);
-    if (nv1 != nv2) return false;
-    for (int i=0; i < nv1; i++) {
-        if (v1[i] != v2[i]) return false;
-    }
-    return true;
-}
-
-static inline bool BINARY_ISNE(const unsigned char *v1, const int nv1,
-                               const unsigned char *v2, const int nv2)
-{
-    assert(nv1 > 0 && nv2 > 0);
-    if (nv1 != nv2) return true;
-    for (int i=0; i < nv1; i++) {
-        if (v1[i] != v2[i]) return true;
-    }
-    return false;
-}
-
-static inline bool BINARY_ISLT(const unsigned char *v1, const int nv1,
-                               const unsigned char *v2, const int nv2)
-{
-    assert(nv1 > 0 && nv2 > 0);
-    int min_nv = (nv1 < nv2 ? nv1 : nv2);
-    for (int i=0; i < min_nv; i++) {
-        if (v1[i] == v2[i]) continue;
-        if (v1[i] <  v2[i]) return true;
-        else                return false;
-    }
-    if (nv1 < nv2) return true;
-    else           return false;
-}
-
-static inline bool BINARY_ISLE(const unsigned char *v1, const int nv1,
-                               const unsigned char *v2, const int nv2)
-{
-    assert(nv1 > 0 && nv2 > 0);
-    int min_nv = (nv1 < nv2 ? nv1 : nv2);
-    for (int i=0; i < min_nv; i++) {
-        if (v1[i] == v2[i]) continue;
-        if (v1[i] <  v2[i]) return true;
-        else                return false;
-    }
-    if (nv1 <= nv2) return true;
-    else            return false;
-}
-
-static inline bool BINARY_ISGT(const unsigned char *v1, const int nv1,
-                               const unsigned char *v2, const int nv2)
-{
-    assert(nv1 > 0 && nv2 > 0);
-    int min_nv = (nv1 < nv2 ? nv1 : nv2);
-    for (int i=0; i < min_nv; i++) {
-        if (v1[i] == v2[i]) continue;
-        if (v1[i] >  v2[i]) return true;
-        else                return false;
-    }
-    if (nv1 > nv2) return true;
-    else           return false;
-}
-
-static inline bool BINARY_ISGE(const unsigned char *v1, const int nv1,
-                               const unsigned char *v2, const int nv2)
-{
-    assert(nv1 > 0 && nv2 > 0);
-    int min_nv = (nv1 < nv2 ? nv1 : nv2);
-    for (int i=0; i < min_nv; i++) {
-        if (v1[i] == v2[i]) continue;
-        if (v1[i] >  v2[i]) return true;
-        else                return false;
-    }
-    if (nv1 >= nv2) return true;
-    else            return false;
-}
-
-static inline void BINARY_AND(const unsigned char *v1, const unsigned char *v2,
-                              const int length, unsigned char *result)
-{
-    for (int i=0; i < length; i++) {
-        result[i] = v1[i] & v2[i];
-    }
-}
-
-static inline void BINARY_OR(const unsigned char *v1, const unsigned char *v2,
-                             const int length, unsigned char *result)
-{
-    for (int i=0; i < length; i++) {
-        result[i] = v1[i] | v2[i];
-    }
-}
-
-static inline void BINARY_XOR(const unsigned char *v1, const unsigned char *v2,
-                              const int length, unsigned char *result)
-{
-    for (int i=0; i < length; i++) {
-        result[i] = v1[i] ^ v2[i];
-    }
-}
-
-static bool (*UINT64_COMPARE_OP[COMPARE_OP_MAX]) (const uint64_t *v1, const uint64_t *v2)
-    = { UINT64_ISEQ, UINT64_ISNE, UINT64_ISLT, UINT64_ISLE, UINT64_ISGT, UINT64_ISGE };
-
-static bool (*BINARY_COMPARE_OP[COMPARE_OP_MAX]) (const unsigned char *v1, const int nv1,
-                                                  const unsigned char *v2, const int nv2)
-    = { BINARY_ISEQ, BINARY_ISNE, BINARY_ISLT, BINARY_ISLE, BINARY_ISGT, BINARY_ISGE };
-
-static void (*BINARY_BITWISE_OP[BITWISE_OP_MAX]) (const unsigned char *v1, const unsigned char *v2,
-                                                  const int length, unsigned char *result)
-    = { BINARY_AND, BINARY_OR, BINARY_XOR };
 
 #define BKEY_COMP(bk1, nbk1, bk2, nbk2) \
         (((nbk1)==0 && (nbk2)==0) ? UINT64_COMP((const uint64_t*)(bk1),(const uint64_t*)(bk2)) \
                                   : BINARY_COMP((bk1),(nbk1),(bk2),(nbk2)))
-
-#define BKEY_ISEQ(bk1, nbk1, bk2, nbk2) \
-        (((nbk1)==0 && (nbk2)==0) ? UINT64_ISEQ((const uint64_t*)(bk1),(const uint64_t*)(bk2)) \
-                                  : BINARY_ISEQ((bk1),(nbk1),(bk2),(nbk2)))
 
 #define BKEY_ISNE(bk1, nbk1, bk2, nbk2) \
         (((nbk1)==0 && (nbk2)==0) ? UINT64_ISNE((const uint64_t*)(bk1),(const uint64_t*)(bk2)) \
@@ -555,17 +377,9 @@ static void (*BINARY_BITWISE_OP[BITWISE_OP_MAX]) (const unsigned char *v1, const
         (((nbk1)==0 && (nbk2)==0) ? UINT64_ISLT((const uint64_t*)(bk1),(const uint64_t*)(bk2)) \
                                   : BINARY_ISLT((bk1),(nbk1),(bk2),(nbk2)))
 
-#define BKEY_ISLE(bk1, nbk1, bk2, nbk2) \
-        (((nbk1)==0 && (nbk2)==0) ? UINT64_ISLE((const uint64_t*)(bk1),(const uint64_t*)(bk2)) \
-                                  : BINARY_ISLE((bk1),(nbk1),(bk2),(nbk2)))
-
 #define BKEY_ISGT(bk1, nbk1, bk2, nbk2) \
         (((nbk1)==0 && (nbk2)==0) ? UINT64_ISGT((const uint64_t*)(bk1),(const uint64_t*)(bk2)) \
                                   : BINARY_ISGT((bk1),(nbk1),(bk2),(nbk2)))
-
-#define BKEY_ISGE(bk1, nbk1, bk2, nbk2) \
-        (((nbk1)==0 && (nbk2)==0) ? UINT64_ISGE((const uint64_t*)(bk1),(const uint64_t*)(bk2)) \
-                                  : BINARY_ISGE((bk1),(nbk1),(bk2),(nbk2)))
 
 static const void *btree_get_bkey(const btree_elem_item *elem, uint32_t *nbkey)
 {
@@ -586,133 +400,51 @@ static int btree_elem_cmp(const void *bkey, uint32_t nbkey, const btree_elem_ite
 /******************* BKEY COMPARISION CODE *************************/
 
 /**************** MAX BKEY RANGE MANIPULATION **********************/
-static inline void UINT64_COPY(const uint64_t *v, uint64_t *result)
-{
-    *result = *v;
-}
 
-static inline void UINT64_DIFF(const uint64_t *v1, const uint64_t *v2, uint64_t *result)
-{
-    assert(*v1 >= *v2);
-    *result = *v1 - *v2;
-}
-
-#if 0 // OLD_CODE
-static inline void UINT64_INCR(uint64_t *v)
-{
-    assert(*v < UINT64_MAX);
-    *v += 1;
-}
-#endif
-
-static inline void UINT64_DECR(uint64_t *v)
-{
-    assert(*v > 0);
-    *v -= 1;
-}
-
-static inline void BINARY_COPY(const unsigned char *v, const int length,
-                               unsigned char *result)
-{
-    if (length > 0)
-        memcpy(result, v, length);
-}
-
-static inline void BINARY_DIFF(unsigned char *v1, const uint8_t nv1,
-                               unsigned char *v2, const uint8_t nv2,
-                               const int length, unsigned char *result)
-{
-    assert(length > 0);
-    unsigned char bkey1_space[MAX_BKEY_LENG];
-    unsigned char bkey2_space[MAX_BKEY_LENG];
-    int i, subtraction;
-
-    if (nv1 < length) {
-        memcpy(bkey1_space, v1, nv1);
-        for (i=nv1; i<length; i++)
-            bkey1_space[i] = 0x00;
-        v1 = bkey1_space;
+static inline bkey_t BKEY_OF(const btree_elem_item *elem) {
+    bkey_t bkey;
+    if (elem->nbkey > 0) {
+        bkey.len = elem->nbkey;
+        memcpy(bkey.val, elem->data, elem->nbkey);
+    } else {
+        bkey.len = 0;
+        memcpy(bkey.val, elem->data, sizeof(uint64_t));
     }
-    if (nv2 < length) {
-        memcpy(bkey2_space, v2, nv2);
-        for (i=nv2; i<length; i++)
-            bkey2_space[i] = 0x00;
-        v2 = bkey2_space;
-    }
-
-    /* assume that the value of v1 >= the value of v2 */
-    subtraction = 0;
-    for (i = (length-1); i >= 0; i--) {
-        if (subtraction == 0) {
-            if (v1[i] >= v2[i]) {
-                result[i] = v1[i] - v2[i];
-            } else {
-                result[i] = 0xFF - v2[i] + v1[i] + 1;
-                subtraction = 1;
-            }
-        } else {
-            if (v1[i] > v2[i]) {
-                result[i] = v1[i] - v2[i] - 1;
-                subtraction = 0;
-            } else {
-                result[i] = 0xFF - v2[i] + v1[i];
-            }
-        }
-    }
+    return bkey;
 }
 
-#if 0 // OLD_CODE
-static inline void BINARY_INCR(unsigned char *v, const int length)
+static inline bkey_t BKEY_DIFF(const unsigned char *bk1, uint8_t nbk1,
+                               const unsigned char *bk2, uint8_t nbk2,
+                               const int precision)
 {
-    assert(length > 0);
-    int i;
-    for (i = (length-1); i >= 0; i--) {
-        if (v[i] < 0xFF) {
-            v[i] += 1;
-            break;
-        }
-        v[i] = 0x00;
+    bkey_t result;
+    if (nbk1 == 0 && nbk2 == 0) {
+        result.len = 0;
+        UINT64_DIFF((const uint64_t*)bk1, (const uint64_t*)bk2, (uint64_t*)result.val);
+    } else {
+        result.len = precision;
+        BINARY_DIFF(bk1, nbk1, bk2, nbk2, precision, result.val);
     }
-    assert(i >= 0);
+    return result;
 }
-#endif
 
-static inline void BINARY_DECR(unsigned char *v, const int length)
+static inline void BKEY_DECR(bkey_t *bk)
 {
-    assert(length > 0);
-    int i;
-    for (i = (length-1); i >= 0; i--) {
-        if (v[i] > 0x00) {
-            v[i] -= 1;
-            break;
-        }
-        v[i] = 0xFF;
-    }
-    assert(i >= 0);
+    if (bk->len == 0)
+        UINT64_DECR((uint64_t*)bk->val);
+    else
+        BINARY_DECR(bk->val, bk->len);
 }
-
-#define BKEY_COPY(bk, nbk, res) \
-        ((nbk)==0 ? UINT64_COPY((const uint64_t*)(bk), (uint64_t*)(res)) \
-                  : BINARY_COPY((bk), (nbk), (res)))
-#define BKEY_DIFF(bk1, nbk1, bk2, nbk2, len, res) \
-        ((len)==0 ? UINT64_DIFF((const uint64_t*)(bk1), (const uint64_t*)(bk2), (uint64_t*)(res)) \
-                  : BINARY_DIFF((bk1), (nbk1), (bk2), (nbk2), (len), (res)))
-#if 0 // OLD_CODE
-#define BKEY_INCR(bk, nbk) \
-        ((nbk)==0 ? UINT64_INCR((uint64_t*)(bk)) : BINARY_INCR((bk), (nbk)))
-#endif
-#define BKEY_DECR(bk, nbk) \
-        ((nbk)==0 ? UINT64_DECR((uint64_t*)(bk)) : BINARY_DECR((bk), (nbk)))
 
 /**************** MAX BKEY RANGE MANIPULATION **********************/
 
 static int do_btree_bkey_range_type(const bkey_range *bkrange)
 {
-    if (bkrange->to_nbkey == BKEY_NULL) {
+    if (bkrange->to_bkey.len == BKEY_NULL) {
         return BKEY_RANGE_TYPE_SIN;
     } else {
-        int comp = BKEY_COMP(bkrange->from_bkey, bkrange->from_nbkey,
-                             bkrange->to_bkey,   bkrange->to_nbkey);
+        int comp = BKEY_COMP(bkrange->from_bkey.val, bkrange->from_bkey.len,
+                             bkrange->to_bkey.val,   bkrange->to_bkey.len);
         if (comp == 0)      return BKEY_RANGE_TYPE_SIN; /* single bkey */
         else if (comp < 0)  return BKEY_RANGE_TYPE_ASC; /* ascending */
         else                return BKEY_RANGE_TYPE_DSC; /* descending */
@@ -890,7 +622,7 @@ static btree_elem_item *ds_btree_find_first(btree_indx_node *root,
     }
 
     /* find leaf node */
-    node = do_btree_find_leaf(root, bkrange->from_bkey, bkrange->from_nbkey,
+    node = do_btree_find_leaf(root, bkrange->from_bkey.val, bkrange->from_bkey.len,
                               (path_flag ? path : NULL), &elem);
     if (elem != NULL) { /* the bkey(from_bkey) is found */
         /* while traversing to leaf node, the bkey can be found.
@@ -910,7 +642,7 @@ static btree_elem_item *ds_btree_find_first(btree_indx_node *root,
         mid  = (left + right) / 2;
         elem = BTREE_GET_ELEM_ITEM(node, mid);
         bkey = btree_get_bkey(elem, &nbkey);
-        comp = BKEY_COMP(bkrange->from_bkey, bkrange->from_nbkey, bkey, nbkey);
+        comp = BKEY_COMP(bkrange->from_bkey.val, bkrange->from_bkey.len, bkey, nbkey);
         if (comp == 0) break;
         if (comp <  0) right = mid-1;
         else           left  = mid+1;
@@ -967,7 +699,7 @@ static btree_elem_item *ds_btree_find_first(btree_indx_node *root,
             } else {
                 elem = BTREE_GET_ELEM_ITEM(path[0].node, path[0].indx);
                 bkey = btree_get_bkey(elem, &nbkey);
-                if (BKEY_ISGT(bkey, nbkey, bkrange->to_bkey, bkrange->to_nbkey))
+                if (BKEY_ISGT(bkey, nbkey, bkrange->to_bkey.val, bkrange->to_bkey.len))
                     elem = NULL;
             }
             break;
@@ -990,7 +722,7 @@ static btree_elem_item *ds_btree_find_first(btree_indx_node *root,
             } else {
                 elem = BTREE_GET_ELEM_ITEM(path[0].node, path[0].indx);
                 bkey = btree_get_bkey(elem, &nbkey);
-                if (BKEY_ISLT(bkey, nbkey, bkrange->to_bkey, bkrange->to_nbkey))
+                if (BKEY_ISLT(bkey, nbkey, bkrange->to_bkey.val, bkrange->to_bkey.len))
                     elem = NULL;
             }
             break;
@@ -1016,7 +748,7 @@ static btree_elem_item *ds_btree_find_next(btree_elem_posi *posi,
         uint32_t nbkey;
         int comp;
         bkey = btree_get_bkey(elem, &nbkey);
-        comp = BKEY_COMP(bkey, nbkey, bkrange->to_bkey, bkrange->to_nbkey);
+        comp = BKEY_COMP(bkey, nbkey, bkrange->to_bkey.val, bkrange->to_bkey.len);
         if (comp == 0) {
             posi->bkeq = true;
         } else {
@@ -1046,7 +778,7 @@ static btree_elem_item *ds_btree_find_prev(btree_elem_posi *posi,
         uint32_t nbkey;
         int comp;
         bkey = btree_get_bkey(elem, &nbkey);
-        comp = BKEY_COMP(bkey, nbkey, bkrange->to_bkey, bkrange->to_nbkey);
+        comp = BKEY_COMP(bkey, nbkey, bkrange->to_bkey.val, bkrange->to_bkey.len);
         if (comp == 0) {
             posi->bkeq = true;
         } else {
@@ -2089,25 +1821,25 @@ static inline void get_bkey_full_range(const int bktype, const bool ascend, bkey
 {
     if (bktype == BKEY_TYPE_BINARY) {
         if (ascend) {
-            memcpy(bkrange->from_bkey, bkey_binary_min, MIN_BKEY_LENG);
-            memcpy(bkrange->to_bkey,   bkey_binary_max, MAX_BKEY_LENG);
-            bkrange->from_nbkey = MIN_BKEY_LENG;
-            bkrange->to_nbkey   = MAX_BKEY_LENG;
+            memcpy(bkrange->from_bkey.val, bkey_binary_min, MIN_BKEY_LENG);
+            memcpy(bkrange->to_bkey.val,   bkey_binary_max, MAX_BKEY_LENG);
+            bkrange->from_bkey.len = MIN_BKEY_LENG;
+            bkrange->to_bkey.len   = MAX_BKEY_LENG;
         } else {
-            memcpy(bkrange->from_bkey, bkey_binary_max, MAX_BKEY_LENG);
-            memcpy(bkrange->to_bkey,   bkey_binary_min, MIN_BKEY_LENG);
-            bkrange->from_nbkey = MAX_BKEY_LENG;
-            bkrange->to_nbkey   = MIN_BKEY_LENG;
+            memcpy(bkrange->from_bkey.val, bkey_binary_max, MAX_BKEY_LENG);
+            memcpy(bkrange->to_bkey.val,   bkey_binary_min, MIN_BKEY_LENG);
+            bkrange->from_bkey.len = MAX_BKEY_LENG;
+            bkrange->to_bkey.len   = MIN_BKEY_LENG;
         }
     } else { /* bktype == BKEY_TYPE_UINT64 or BKEY_TYPE_UNKNOWN */
         if (ascend) {
-            memcpy(bkrange->from_bkey, (void*)&bkey_uint64_min, sizeof(uint64_t));
-            memcpy(bkrange->to_bkey,   (void*)&bkey_uint64_max, sizeof(uint64_t));
+            memcpy(bkrange->from_bkey.val, (void*)&bkey_uint64_min, sizeof(uint64_t));
+            memcpy(bkrange->to_bkey.val,   (void*)&bkey_uint64_max, sizeof(uint64_t));
         } else {
-            memcpy(bkrange->from_bkey, (void*)&bkey_uint64_max, sizeof(uint64_t));
-            memcpy(bkrange->to_bkey,   (void*)&bkey_uint64_min, sizeof(uint64_t));
+            memcpy(bkrange->from_bkey.val, (void*)&bkey_uint64_max, sizeof(uint64_t));
+            memcpy(bkrange->to_bkey.val,   (void*)&bkey_uint64_min, sizeof(uint64_t));
         }
-        bkrange->from_nbkey = bkrange->to_nbkey = 0;
+        bkrange->from_bkey.len = bkrange->to_bkey.len = 0;
     }
 }
 #endif
@@ -2129,9 +1861,9 @@ static ENGINE_ERROR_CODE do_btree_overflow_check(btree_meta_info *info, btree_el
 
         if (BKEY_ISLT(elem->data, elem->nbkey, min_bkey_elem->data, min_bkey_elem->nbkey))
         {
-            newbkeyrange.len = info->maxbkeyrange.len;
-            BKEY_DIFF(max_bkey_elem->data, max_bkey_elem->nbkey, elem->data, elem->nbkey,
-                      newbkeyrange.len, newbkeyrange.val);
+            newbkeyrange = BKEY_DIFF(max_bkey_elem->data, max_bkey_elem->nbkey,
+                                     elem->data, elem->nbkey,
+                                     info->maxbkeyrange.len);
             if (BKEY_ISGT(newbkeyrange.val, newbkeyrange.len, info->maxbkeyrange.val, info->maxbkeyrange.len))
             {
                 if (info->ovflact == OVFL_LARGEST_TRIM || info->ovflact == OVFL_LARGEST_SILENT_TRIM)
@@ -2142,9 +1874,9 @@ static ENGINE_ERROR_CODE do_btree_overflow_check(btree_meta_info *info, btree_el
         }
         else if (BKEY_ISGT(elem->data, elem->nbkey, max_bkey_elem->data, max_bkey_elem->nbkey))
         {
-            newbkeyrange.len = info->maxbkeyrange.len;
-            BKEY_DIFF(elem->data, elem->nbkey, min_bkey_elem->data, min_bkey_elem->nbkey,
-                      newbkeyrange.len, newbkeyrange.val);
+            newbkeyrange = BKEY_DIFF(elem->data, elem->nbkey,
+                                     min_bkey_elem->data, min_bkey_elem->nbkey,
+                                     info->maxbkeyrange.len);
             if (BKEY_ISGT(newbkeyrange.val, newbkeyrange.len, info->maxbkeyrange.val, info->maxbkeyrange.len))
             {
                 if (info->ovflact == OVFL_SMALLEST_TRIM || info->ovflact == OVFL_SMALLEST_SILENT_TRIM)
@@ -2194,15 +1926,12 @@ static void do_btree_build_smallest_trim_range(btree_meta_info *info,
      * => min bkey ~ (new max bkey - maxbkeyrange - 1)
      */
     /* from bkey */
-    btree_elem_item *edge_elem = do_btree_get_first_elem(info->root);
-    bkrange->from_nbkey = edge_elem->nbkey;
-    BKEY_COPY(edge_elem->data, edge_elem->nbkey, bkrange->from_bkey);
+    bkrange->from_bkey = BKEY_OF(do_btree_get_first_elem(info->root));
     /* to bkey */
-    bkrange->to_nbkey = info->maxbkeyrange.len;
-    BKEY_DIFF(elem->data, elem->nbkey,
-              info->maxbkeyrange.val, info->maxbkeyrange.len,
-              bkrange->to_nbkey, bkrange->to_bkey);
-    BKEY_DECR(bkrange->to_bkey, bkrange->to_nbkey);
+    bkrange->to_bkey = BKEY_DIFF(elem->data, elem->nbkey,
+                                 info->maxbkeyrange.val, info->maxbkeyrange.len,
+                                 info->maxbkeyrange.len);
+    BKEY_DECR(&bkrange->to_bkey);
 }
 
 static void do_btree_build_largest_trim_range(btree_meta_info *info,
@@ -2214,19 +1943,19 @@ static void do_btree_build_largest_trim_range(btree_meta_info *info,
      */
     /* from bkey */
     btree_elem_item *edge_elem = do_btree_get_last_elem(info->root);
-    bkrange->from_nbkey = info->maxbkeyrange.len;
-    BKEY_DIFF(edge_elem->data, edge_elem->nbkey, elem->data, elem->nbkey,
-              bkrange->from_nbkey, bkrange->from_bkey);
-    BKEY_DIFF(bkrange->from_bkey, bkrange->from_nbkey,
-              info->maxbkeyrange.val, info->maxbkeyrange.len,
-              bkrange->from_nbkey, bkrange->from_bkey);
-    BKEY_DECR(bkrange->from_bkey, bkrange->from_nbkey);
-    BKEY_DIFF(edge_elem->data, edge_elem->nbkey,
-              bkrange->from_bkey, bkrange->from_nbkey,
-              bkrange->from_nbkey, bkrange->from_bkey);
+    bkrange->from_bkey = BKEY_DIFF(edge_elem->data, edge_elem->nbkey,
+                                   elem->data, elem->nbkey,
+                                   info->maxbkeyrange.len);
+    bkrange->from_bkey = BKEY_DIFF(bkrange->from_bkey.val, bkrange->from_bkey.len,
+                                   info->maxbkeyrange.val, info->maxbkeyrange.len,
+                                   info->maxbkeyrange.len);
+    BKEY_DECR(&bkrange->from_bkey);
+
+    bkrange->from_bkey = BKEY_DIFF(edge_elem->data, edge_elem->nbkey,
+                                   bkrange->from_bkey.val, bkrange->from_bkey.len,
+                                   info->maxbkeyrange.len);
     /* to bkey */
-    bkrange->to_nbkey = edge_elem->nbkey;
-    BKEY_COPY(edge_elem->data, edge_elem->nbkey, bkrange->to_bkey);
+    bkrange->to_bkey = BKEY_OF(edge_elem);
 }
 
 static btree_elem_item *do_btree_delete_first_elem(btree_meta_info *info,
@@ -2612,14 +2341,14 @@ static uint32_t do_btree_elem_count(btree_meta_info *info,
         btree_elem_item *max_bkey_elem = do_btree_get_last_elem(info->root);
         int min_comp, max_comp;
         if (bkrtype == BKEY_RANGE_TYPE_ASC) {
-            min_comp = BKEY_COMP(bkrange->from_bkey, bkrange->from_nbkey,
+            min_comp = BKEY_COMP(bkrange->from_bkey.val, bkrange->from_bkey.len,
                                  min_bkey_elem->data, min_bkey_elem->nbkey);
-            max_comp = BKEY_COMP(bkrange->to_bkey, bkrange->to_nbkey,
+            max_comp = BKEY_COMP(bkrange->to_bkey.val, bkrange->to_bkey.len,
                                  max_bkey_elem->data, max_bkey_elem->nbkey);
         } else { /* BKEY_RANGE_TYPE_DSC */
-            min_comp = BKEY_COMP(bkrange->to_bkey, bkrange->to_nbkey,
+            min_comp = BKEY_COMP(bkrange->to_bkey.val, bkrange->to_bkey.len,
                                  min_bkey_elem->data, min_bkey_elem->nbkey);
-            max_comp = BKEY_COMP(bkrange->from_bkey, bkrange->from_nbkey,
+            max_comp = BKEY_COMP(bkrange->from_bkey.val, bkrange->from_bkey.len,
                                  max_bkey_elem->data, max_bkey_elem->nbkey);
         }
         if (min_comp <= 0 && max_comp >= 0) {
@@ -3200,8 +2929,8 @@ do_btree_smget_scan_sort(token_t *key_array, const int key_count,
         if (info->ccnt == 0) { /* empty collection */
             do_item_release(it); continue;
         }
-        if ((info->bktype == BKEY_TYPE_UINT64 && bkrange->from_nbkey >  0) ||
-            (info->bktype == BKEY_TYPE_BINARY && bkrange->from_nbkey == 0)) {
+        if ((info->bktype == BKEY_TYPE_UINT64 && bkrange->from_bkey.len >  0) ||
+            (info->bktype == BKEY_TYPE_BINARY && bkrange->from_bkey.len == 0)) {
             do_item_release(it);
             ret = ENGINE_EBADBKEY; break;
         }
@@ -3648,8 +3377,8 @@ ENGINE_ERROR_CODE btree_elem_update(const char *key, const uint32_t nkey, const 
             if (info->ccnt == 0) {
                 ret = ENGINE_ELEM_ENOENT; break;
             }
-            if ((info->bktype == BKEY_TYPE_UINT64 && bkrange->from_nbkey >  0) ||
-                (info->bktype == BKEY_TYPE_BINARY && bkrange->from_nbkey == 0)) {
+            if ((info->bktype == BKEY_TYPE_UINT64 && bkrange->from_bkey.len >  0) ||
+                (info->bktype == BKEY_TYPE_BINARY && bkrange->from_bkey.len == 0)) {
                 ret = ENGINE_EBADBKEY; break;
             }
             ret = do_btree_elem_update(info, bkrtype, bkrange, eupdate, value, nbytes);
@@ -3682,8 +3411,8 @@ ENGINE_ERROR_CODE btree_elem_delete(const char *key, const uint32_t nkey,
             if (info->ccnt == 0) {
                 ret = ENGINE_ELEM_ENOENT; break;
             }
-            if ((info->bktype == BKEY_TYPE_UINT64 && bkrange->from_nbkey >  0) ||
-                (info->bktype == BKEY_TYPE_BINARY && bkrange->from_nbkey == 0)) {
+            if ((info->bktype == BKEY_TYPE_UINT64 && bkrange->from_bkey.len >  0) ||
+                (info->bktype == BKEY_TYPE_BINARY && bkrange->from_bkey.len == 0)) {
                 ret = ENGINE_EBADBKEY; break;
             }
             *del_count = do_btree_elem_delete(info, bkrtype, bkrange, efilter, 0, req_count,
@@ -3725,7 +3454,7 @@ ENGINE_ERROR_CODE btree_elem_arithmetic(const char *key, const uint32_t nkey,
     ret = do_btree_item_find(key, nkey, DONT_UPDATE, &it);
     if (ret == ENGINE_SUCCESS) {
         btree_meta_info *info = (btree_meta_info *)item_get_meta(it);
-        ret = do_btree_elem_arithmetic(info, bkrange->from_bkey, bkrange->from_nbkey,
+        ret = do_btree_elem_arithmetic(info, bkrange->from_bkey.val, bkrange->from_bkey.len,
                                        increment, create, delta, initial, eflagp, result);
         do_item_release(it);
     }
@@ -3762,8 +3491,8 @@ ENGINE_ERROR_CODE btree_elem_get(const char *key, const uint32_t nkey,
             if (info->ccnt == 0 || offset >= info->ccnt) {
                 ret = ENGINE_ELEM_ENOENT; break;
             }
-            if ((info->bktype == BKEY_TYPE_UINT64 && bkrange->from_nbkey >  0) ||
-                (info->bktype == BKEY_TYPE_BINARY && bkrange->from_nbkey == 0)) {
+            if ((info->bktype == BKEY_TYPE_UINT64 && bkrange->from_bkey.len >  0) ||
+                (info->bktype == BKEY_TYPE_BINARY && bkrange->from_bkey.len == 0)) {
                 ret = ENGINE_EBADBKEY; break;
             }
             if (req_count == 0 || info->ccnt < req_count) {
@@ -3827,8 +3556,8 @@ ENGINE_ERROR_CODE btree_elem_count(const char *key, const uint32_t nkey,
             if ((info->mflags & COLL_META_FLAG_READABLE) == 0) {
                 ret = ENGINE_UNREADABLE; break;
             }
-            if ((info->bktype == BKEY_TYPE_UINT64 && bkrange->from_nbkey >  0) ||
-                (info->bktype == BKEY_TYPE_BINARY && bkrange->from_nbkey == 0)) {
+            if ((info->bktype == BKEY_TYPE_UINT64 && bkrange->from_bkey.len >  0) ||
+                (info->bktype == BKEY_TYPE_BINARY && bkrange->from_bkey.len == 0)) {
                 ret = ENGINE_EBADBKEY; break;
             }
             *elem_count = do_btree_elem_count(info, bkrtype, bkrange, efilter, opcost);
@@ -3858,8 +3587,8 @@ ENGINE_ERROR_CODE btree_posi_find(const char *key, const uint32_t nkey, const bk
             if (info->ccnt == 0) {
                 ret = ENGINE_ELEM_ENOENT; break;
             }
-            if ((info->bktype == BKEY_TYPE_UINT64 && bkrange->from_nbkey >  0) ||
-                (info->bktype == BKEY_TYPE_BINARY && bkrange->from_nbkey == 0)) {
+            if ((info->bktype == BKEY_TYPE_UINT64 && bkrange->from_bkey.len >  0) ||
+                (info->bktype == BKEY_TYPE_BINARY && bkrange->from_bkey.len == 0)) {
                 ret = ENGINE_EBADBKEY; break;
             }
             *position = do_btree_posi_find(info, bkrtype, bkrange, order);
@@ -3894,8 +3623,8 @@ ENGINE_ERROR_CODE btree_posi_find_with_get(const char *key, const uint32_t nkey,
             if (info->ccnt == 0) {
                 ret = ENGINE_ELEM_ENOENT; break;
             }
-            if ((info->bktype == BKEY_TYPE_UINT64 && bkrange->from_nbkey >  0) ||
-                (info->bktype == BKEY_TYPE_BINARY && bkrange->from_nbkey == 0)) {
+            if ((info->bktype == BKEY_TYPE_UINT64 && bkrange->from_bkey.len >  0) ||
+                (info->bktype == BKEY_TYPE_BINARY && bkrange->from_bkey.len == 0)) {
                 ret = ENGINE_EBADBKEY; break;
             }
             if ((eresult->elem_array = (eitem **)malloc((2*count+1)*sizeof(eitem*))) == NULL) {
@@ -4083,8 +3812,8 @@ ENGINE_ERROR_CODE btree_coll_getattr(hash_item *it, item_attr *attrp,
     if (info->ccnt > 0) {
         btree_elem_item *min_bkey_elem = do_btree_get_first_elem(info->root);
         btree_elem_item *max_bkey_elem = do_btree_get_last_elem(info->root);
-        do_btree_copy_bkey(min_bkey_elem, &attrp->minbkey);
-        do_btree_copy_bkey(max_bkey_elem, &attrp->maxbkey);
+        attrp->minbkey = BKEY_OF(min_bkey_elem);
+        attrp->maxbkey = BKEY_OF(max_bkey_elem);
     }
     return ENGINE_SUCCESS;
 }
@@ -4128,10 +3857,9 @@ ENGINE_ERROR_CODE btree_coll_setattr(hash_item *it, item_attr *attrp,
                     bkey_t curbkeyrange;
                     btree_elem_item *min_bkey_elem = do_btree_get_first_elem(info->root);
                     btree_elem_item *max_bkey_elem = do_btree_get_last_elem(info->root);
-                    curbkeyrange.len = attrp->maxbkeyrange.len;
-                    BKEY_DIFF(max_bkey_elem->data, max_bkey_elem->nbkey,
-                              min_bkey_elem->data, min_bkey_elem->nbkey,
-                              curbkeyrange.len, curbkeyrange.val);
+                    curbkeyrange = BKEY_DIFF(max_bkey_elem->data, max_bkey_elem->nbkey,
+                                             min_bkey_elem->data, min_bkey_elem->nbkey,
+                                             attrp->maxbkeyrange.len);
                     if (BKEY_ISGT(curbkeyrange.val, curbkeyrange.len,
                                   attrp->maxbkeyrange.val, attrp->maxbkeyrange.len)) {
                         return ENGINE_EBADVALUE;
@@ -4290,10 +4018,10 @@ ENGINE_ERROR_CODE btree_apply_elem_delete(void *engine, hash_item *it,
                 PRINT_NKEY(it->nkey), key, it->nkey, nbkey, bkey, nbkey);
 
     /* one-element range */
-    memcpy(bkrange.from_bkey, bkey, BTREE_REAL_NBKEY(nbkey));
-    bkrange.from_nbkey = nbkey;
-    /* bkey_range.to_bkey */
-    bkrange.to_nbkey = BKEY_NULL;
+    memcpy(bkrange.from_bkey.val, bkey, BTREE_REAL_NBKEY(nbkey));
+    bkrange.from_bkey.len = nbkey;
+    /* bkey_range.to_bkey.val */
+    bkrange.to_bkey.len = BKEY_NULL;
 
     LOCK_CACHE();
     do {
@@ -4309,8 +4037,8 @@ ENGINE_ERROR_CODE btree_apply_elem_delete(void *engine, hash_item *it,
                         " no element.\n");
             ret = ENGINE_ELEM_ENOENT; break;
         }
-        if ((info->bktype == BKEY_TYPE_UINT64 && bkrange.from_nbkey > 0) ||
-            (info->bktype == BKEY_TYPE_BINARY && bkrange.from_nbkey == 0)) {
+        if ((info->bktype == BKEY_TYPE_UINT64 && bkrange.from_bkey.len > 0) ||
+            (info->bktype == BKEY_TYPE_BINARY && bkrange.from_bkey.len == 0)) {
             logger->log(EXTENSION_LOG_WARNING, NULL, "btree_apply_elem_delete failed."
                         " bkey mismatch. key=%.*s nkey=%u bkey=%.*s nbkey=%u\n",
                         PRINT_NKEY(it->nkey), key, it->nkey, nbkey, bkey, nbkey);
@@ -4370,11 +4098,11 @@ ENGINE_ERROR_CODE btree_apply_elem_delete_logical(void *engine, hash_item *it,
                         " no element.\n");
             ret = ENGINE_ELEM_ENOENT; break;
         }
-        if ((info->bktype == BKEY_TYPE_UINT64 && bkrange->from_nbkey > 0) ||
-            (info->bktype == BKEY_TYPE_BINARY && bkrange->from_nbkey == 0)) {
+        if ((info->bktype == BKEY_TYPE_UINT64 && bkrange->from_bkey.len > 0) ||
+            (info->bktype == BKEY_TYPE_BINARY && bkrange->from_bkey.len == 0)) {
             logger->log(EXTENSION_LOG_WARNING, NULL, "btree_apply_elem_delete_logical failed."
                         " bkey mismatch. key=%.*s nkey=%u from_bkey=%.*s\n",
-                        PRINT_NKEY(it->nkey), key, it->nkey, bkrange->from_nbkey, bkrange->from_bkey);
+                        PRINT_NKEY(it->nkey), key, it->nkey, bkrange->from_bkey.len, bkrange->from_bkey.val);
             ret = ENGINE_EBADBKEY; break;
         }
 
@@ -4384,7 +4112,7 @@ ENGINE_ERROR_CODE btree_apply_elem_delete_logical(void *engine, hash_item *it,
             logger->log(EXTENSION_LOG_INFO, NULL, "btree_apply_elem_delete_logical failed."
                         " no element deleted. key=%.*s nkey=%u from_bkey=%.*s to_bkey=%.*s",
                         PRINT_NKEY(it->nkey), key, it->nkey,
-                        bkrange->from_nbkey, bkrange->from_bkey, bkrange->to_nbkey, bkrange->to_bkey);
+                        bkrange->from_bkey.len, bkrange->from_bkey.val, bkrange->to_bkey.len, bkrange->to_bkey.val);
             ret = ENGINE_ELEM_ENOENT; break;
         }
     } while(0);
@@ -4449,13 +4177,6 @@ ENGINE_ERROR_CODE item_btree_coll_init(void *engine_ptr)
     bkey_binary_min[0] = 0x00;
     for (int i=0; i < MAX_BKEY_LENG; i++) {
         bkey_binary_max[i] = 0xFF;
-    }
-
-    /* remove unused function warnings */
-    if (1) {
-        uint64_t val1 = 10;
-        uint64_t val2 = 20;
-        assert(UINT64_COMPARE_OP[COMPARE_OP_LT](&val1, &val2) == true);
     }
 
     logger->log(EXTENSION_LOG_INFO, NULL, "ITEM btree module initialized.\n");

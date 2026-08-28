@@ -1123,19 +1123,19 @@ static void lrec_bt_elem_delete_logical_write(LogRec *logrec, char *bufptr)
 {
     BtreeElemDelLgcLog *log = (BtreeElemDelLgcLog*)logrec;
     int offset = sizeof(LogHdr) + offsetof(BtreeElemDelLgcData, data);
-    int real_from_nbkey = BTREE_REAL_NBKEY(log->body.from_nbkey);
-    int real_to_nbkey = BTREE_REAL_NBKEY(log->body.to_nbkey);
+    int real_from_nbkey = BTREE_REAL_NBKEY(log->body.from_bkey.len);
+    int real_to_nbkey = BTREE_REAL_NBKEY(log->body.to_bkey.len);
 
     memcpy(bufptr, (void*)logrec, offset);
     /* key copy */
     memcpy(bufptr + offset, log->keyptr, log->body.keylen);
     offset += log->body.keylen;
     /* from bkey copy */
-    memcpy(bufptr + offset, log->bkrangep->from_bkey, real_from_nbkey);
+    memcpy(bufptr + offset, log->bkrangep->from_bkey.val, real_from_nbkey);
     offset += real_from_nbkey;
     /* to bkey copy */
     if (real_to_nbkey != BKEY_NULL) {
-        memcpy(bufptr + offset, log->bkrangep->to_bkey, real_to_nbkey);
+        memcpy(bufptr + offset, log->bkrangep->to_bkey.val, real_to_nbkey);
         offset += real_to_nbkey;
     }
     /* eflag filter copy */
@@ -1156,19 +1156,19 @@ static ENGINE_ERROR_CODE lrec_bt_elem_delete_logical_redo(LogRec *logrec)
     BtreeElemDelLgcLog  *log  = (BtreeElemDelLgcLog*)logrec;
     BtreeElemDelLgcData *body = &log->body;
     char *keyptr  = body->data;
-    int  real_from_nbkey = BTREE_REAL_NBKEY(body->from_nbkey);
-    int  real_to_nbkey = BTREE_REAL_NBKEY(body->to_nbkey);
+    int  real_from_nbkey = BTREE_REAL_NBKEY(body->from_bkey.len);
+    int  real_to_nbkey = BTREE_REAL_NBKEY(body->to_bkey.len);
     char *from_bkeyptr = keyptr + body->keylen;
     char *to_bkeyptr = from_bkeyptr + real_from_nbkey;
 
     /* element range */
     bkey_range bkrange;
-    memcpy(bkrange.from_bkey, from_bkeyptr, real_from_nbkey);
-    bkrange.from_nbkey = body->from_nbkey;
+    memcpy(bkrange.from_bkey.val, from_bkeyptr, real_from_nbkey);
+    bkrange.from_bkey.len = body->from_bkey.len;
     if (real_to_nbkey != BKEY_NULL) {
-        memcpy(bkrange.to_bkey, to_bkeyptr, real_to_nbkey);
+        memcpy(bkrange.to_bkey.val, to_bkeyptr, real_to_nbkey);
     }
-    bkrange.to_nbkey = body->to_nbkey;
+    bkrange.to_bkey.len = body->to_bkey.len;
 
     /* efilter */
     eflag_filter efilter;
@@ -1208,18 +1208,18 @@ static void lrec_bt_elem_delete_logical_print(LogRec *logrec)
     BtreeElemDelLgcLog *log = (BtreeElemDelLgcLog*)logrec;
     char *keyptr = log->body.data;
     char *fbkeyptr = keyptr + log->body.keylen;
-    char *tbkeyptr = fbkeyptr + BTREE_REAL_NBKEY(log->body.from_nbkey);
+    char *tbkeyptr = fbkeyptr + BTREE_REAL_NBKEY(log->body.from_bkey.len);
 
     char fbkeystr[90];
     char tbkeystr[90];
-    lrec_bkey_print(log->body.from_nbkey, (unsigned char *)fbkeyptr, fbkeystr);
-    lrec_bkey_print(log->body.to_nbkey, (unsigned char*)tbkeyptr, tbkeystr);
+    lrec_bkey_print(log->body.from_bkey.len, (unsigned char *)fbkeyptr, fbkeystr);
+    lrec_bkey_print(log->body.to_bkey.len, (unsigned char*)tbkeyptr, tbkeystr);
 
     int efilterlen = MAX_EFLAG_LENG*2 + (MAX_EFLAG_LENG*2+3)*MAX_EFLAG_COMPARE_COUNT + 100;
     char efilterstr[efilterlen];
     if (log->body.filtering) {
-        bool single_bkey = (BTREE_REAL_NBKEY(log->body.to_nbkey) == BKEY_NULL ? true : false);
-        char *bitwvalptr = tbkeyptr + (single_bkey ? 0 : BTREE_REAL_NBKEY(log->body.to_nbkey));
+        bool single_bkey = (BTREE_REAL_NBKEY(log->body.to_bkey.len) == BKEY_NULL ? true : false);
+        char *bitwvalptr = tbkeyptr + (single_bkey ? 0 : BTREE_REAL_NBKEY(log->body.to_bkey.len));
         char *compvalptr = bitwvalptr + log->body.nbitwval;
         char bitwvalstr[MAX_EFLAG_LENG*2];
         char compvalstr[(MAX_EFLAG_LENG*2+3)*MAX_EFLAG_COMPARE_COUNT];
@@ -1787,8 +1787,8 @@ int lrec_construct_btree_elem_delete_logical(LogRec *logrec, hash_item *it,
     log->body.drop   = drop;
     log->body.offset = offset;
     log->body.reqcount = reqcount;
-    log->body.from_nbkey = bkrange->from_nbkey;
-    log->body.to_nbkey = bkrange->to_nbkey;
+    log->body.from_bkey.len = bkrange->from_bkey.len;
+    log->body.to_bkey.len = bkrange->to_bkey.len;
     log->body.filtering = (efilter == NULL ? 0 : 1);
     if (log->body.filtering) {
         log->body.nbitwval = efilter->nbitwval;
@@ -1801,8 +1801,8 @@ int lrec_construct_btree_elem_delete_logical(LogRec *logrec, hash_item *it,
     log->bkrangep = (bkey_range*)bkrange;
     log->efilterp = (eflag_filter*)efilter;
 
-    uint8_t real_from_nbkey = BTREE_REAL_NBKEY(log->body.from_nbkey);
-    uint8_t real_to_nbkey = BTREE_REAL_NBKEY(log->body.to_nbkey);
+    uint8_t real_from_nbkey = BTREE_REAL_NBKEY(log->body.from_bkey.len);
+    uint8_t real_to_nbkey = BTREE_REAL_NBKEY(log->body.to_bkey.len);
     log->header.logtype = LOG_BT_ELEM_DELETE_LOGICAL;
     log->header.updtype = UPD_BT_ELEM_DELETE;
     log->header.body_length = GET_8_ALIGN_SIZE(offsetof(BtreeElemDelLgcData, data)
