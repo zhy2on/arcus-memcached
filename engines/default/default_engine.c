@@ -1048,9 +1048,8 @@ default_btree_elem_smget(ENGINE_HANDLE* handle, const void* cookie,
                          token_t *karray, const int kcount,
                          const bkey_range *bkrange,
                          const eflag_filter *efilter,
-                         const uint32_t count,
-                         const bool unique, smget_result_t *result,
-                         uint16_t vbucket)
+                         const uint32_t count, const bool unique,
+                         smget_result_t *result, uint16_t vbucket)
 {
     struct default_engine *engine = get_handle(handle);
     ENGINE_ERROR_CODE ret;

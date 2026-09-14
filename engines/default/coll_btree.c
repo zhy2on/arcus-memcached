@@ -1364,8 +1364,7 @@ do_btree_smget_elem_sort(btree_scan_info *btree_scan_buf,
                          uint16_t *sort_sindx_buf, const int sort_sindx_cnt,
                          const int bkrtype, const bkey_range *bkrange,
                          const eflag_filter *efilter,
-                         const uint32_t count,
-                         const bool unique,
+                         const uint32_t count, const bool unique,
                          smget_result_t *smres)
 {
     ENGINE_ERROR_CODE ret = ENGINE_SUCCESS;
@@ -1403,11 +1402,11 @@ do_btree_smget_elem_sort(btree_scan_info *btree_scan_buf,
         if (smres->elem_count > 0 && dup_bkey_found) {
             smres->duplicated = true;
         }
+        elem->refcount++;
         smres->elem_array[smres->elem_count] = elem;
         smres->elem_kinfo[smres->elem_count].kidx = btree_scan_buf[curr_idx].kidx;
         smres->elem_kinfo[smres->elem_count].flag = btree_scan_buf[curr_idx].it->flags;
         smres->elem_count += 1;
-        elem->refcount++;
         if (smres->elem_count >= count) break;
 
 scan_next:
@@ -1935,9 +1934,9 @@ ENGINE_ERROR_CODE btree_elem_get_by_posi(const char *key, const uint32_t nkey,
 
 #ifdef SUPPORT_BOP_SMGET
 ENGINE_ERROR_CODE btree_elem_smget(token_t *key_array, const int key_count,
-                                   const bkey_range *bkrange, const eflag_filter *efilter,
-                                   const uint32_t count,
-                                   const bool unique,
+                                   const bkey_range *bkrange,
+                                   const eflag_filter *efilter,
+                                   const uint32_t count, const bool unique,
                                    smget_result_t *result)
 {
     btree_scan_info btree_scan_buf[count+1]; /* one more scan needed */
