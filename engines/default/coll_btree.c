@@ -369,7 +369,7 @@ static ENGINE_ERROR_CODE do_btree_elem_update(btree_meta_info *info,
         return ENGINE_ELEM_ENOENT;
     }
 
-    elem = (btree_elem_item *)bplus_find_first(bplus, bkrtype, bkrange, &posi, false);
+    elem = (btree_elem_item *)bplus_find_first(bplus, (bkrtype != BKEY_RANGE_TYPE_DSC), bkrange, &posi, false);
     if (elem == NULL) {
         return ENGINE_ELEM_ENOENT;
     }
@@ -1196,10 +1196,10 @@ do_btree_smget_scan_sort(token_t *key_array, const int key_count,
         }
         assert(bplus->root != NULL);
 
-        elem = (btree_elem_item *)bplus_scan_first(bplus, bkrtype, bkrange, efilter, &posi, &satisfied);
+        elem = (btree_elem_item *)bplus_scan_first(bplus, ascending, bkrange, efilter, &posi, &satisfied);
         if (elem == NULL) { /* No elements within the bkey range */
             if (BTREE_NEED_TRIM_NOTIFICATION(info)) {
-                outside = bplus_posi_outside(&posi, bkrtype);
+                outside = bplus_posi_outside(&posi, ascending);
                 if (do_btree_overlapped_with_trimmed_space(info, outside)) {
                     /* Some elements weren't cached because of overflow trim */
                     do_btree_smget_add_miss(smres, kidx, ENGINE_EBKEYOOR);
@@ -1210,7 +1210,7 @@ do_btree_smget_scan_sort(token_t *key_array, const int key_count,
 
         if (posi.bkeq == false) {
             if (BTREE_NEED_TRIM_NOTIFICATION(info)) {
-                outside = bplus_posi_outside(&posi, bkrtype);
+                outside = bplus_posi_outside(&posi, ascending);
                 if (do_btree_overlapped_with_trimmed_space(info, outside)) {
                     /* Some elements weren't cached because of overflow trim */
                     do_btree_smget_add_miss(smres, kidx, ENGINE_EBKEYOOR);
@@ -1224,11 +1224,11 @@ do_btree_smget_scan_sort(token_t *key_array, const int key_count,
 
 scan_next:
         if (satisfied != true) {
-            elem = (btree_elem_item *)bplus_scan_next(bplus, &posi, bkrtype, bkrange, efilter);
+            elem = (btree_elem_item *)bplus_scan_next(bplus, &posi, ascending, bkrange, efilter);
             if (elem == NULL) {
                 if (posi.node == NULL) {
                     if (BTREE_NEED_TRIM_NOTIFICATION(info)) {
-                        outside = bplus_posi_outside(&posi, bkrtype);
+                        outside = bplus_posi_outside(&posi, ascending);
                         if (do_btree_overlapped_with_trimmed_space(info, outside)) {
                             /* Some elements weren't cached because of overflow trim */
                             trim_elem = (btree_elem_item *)(ascending ? bplus_get_last_elem(bplus->root)
@@ -1414,12 +1414,12 @@ do_btree_smget_elem_sort(btree_scan_info *btree_scan_buf,
 scan_next:
         info = (btree_meta_info *)item_get_meta(btree_scan_buf[curr_idx].it);
         elem = (btree_elem_item *)bplus_scan_next(&info->bplus, &btree_scan_buf[curr_idx].posi,
-                                                  bkrtype, bkrange, efilter);
+                                                  ascending, bkrange, efilter);
         if (elem == NULL) {
             if (btree_scan_buf[curr_idx].posi.node == NULL) {
                 /* reached to the end of b+tree scan */
                 if (BTREE_NEED_TRIM_NOTIFICATION(info)) {
-                    outside = bplus_posi_outside(&btree_scan_buf[curr_idx].posi, bkrtype);
+                    outside = bplus_posi_outside(&btree_scan_buf[curr_idx].posi, ascending);
                     if (do_btree_overlapped_with_trimmed_space(info, outside)) {
                         trim_elem = (btree_elem_item *)(ascending ? bplus_get_last_elem(info->bplus.root)
                                                                   : bplus_get_first_elem(info->bplus.root));
@@ -2007,7 +2007,7 @@ void btree_elem_get_all(btree_meta_info *info, elems_result_t *eresult)
     bplus_meta *bplus = &info->bplus;
     bplus_elem_posi  posi;
 
-    elem = (btree_elem_item *)bplus_find_first(bplus, BKEY_RANGE_TYPE_ASC, NULL, &posi, false);
+    elem = (btree_elem_item *)bplus_find_first(bplus, true, NULL, &posi, false);
     while (elem != NULL) {
         elem->refcount++;
         eresult->elem_array[eresult->elem_count++] = elem;
