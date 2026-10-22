@@ -78,7 +78,7 @@ typedef struct _bplus_elem_posi {
     uint16_t         indx;
     /* It is used temporarily in order to check
      * if the found bkey is equal to from_bkey or to_bkey of given bkey range
-     * in the bplus_find_first/next/prev functions.
+     * in the do_bplus_find_first/next/prev functions.
      */
     bool             bkeq;
 } bplus_elem_posi;
@@ -177,14 +177,6 @@ bplus_elem_item *bplus_elem_find(bplus_meta *bplus,
                                  const void *bkey, uint32_t nbkey,
                                  const void *value, uint32_t nvalue,
                                  bplus_elem_posi *path);
-bplus_elem_item *bplus_find_first(bplus_meta *bplus,
-                                  const bool forward, const bkey_range *bkrange,
-                                  bplus_elem_posi *path, const bool path_flag);
-bplus_elem_item *bplus_find_next(bplus_meta *bplus,
-                                 bplus_elem_posi *posi, const bkey_range *bkrange);
-bplus_elem_item *bplus_find_prev(bplus_meta *bplus,
-                                 bplus_elem_posi *posi, const bkey_range *bkrange);
-
 ENGINE_ERROR_CODE bplus_elem_add(bplus_meta *bplus,
                                  bplus_elem_posi *path, bplus_elem_item *elem,
                                  size_t *space_increased);
