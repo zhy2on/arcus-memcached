@@ -468,10 +468,10 @@ extern "C" {
                                              const void* key,
                                              const int nkey,
                                              eitem *eitem,
-                                             const bool replace_if_exist,
                                              item_attr *attrp,
-                                             bool *replaced,
+                                             const bool replace_if_exist,
                                              bool *created,
+                                             bool *replaced,
                                              uint16_t vbucket);
         ENGINE_ERROR_CODE (*map_elem_update)(ENGINE_HANDLE* handle,
                                              const void* cookie,
@@ -521,9 +521,9 @@ extern "C" {
 
         ENGINE_ERROR_CODE (*btree_elem_insert)(ENGINE_HANDLE* handle, const void* cookie,
                                               const void* key, const int nkey,
-                                              eitem *eitem, const bool replace_if_exist,
-                                              item_attr *attrp,
-                                              bool *replaced, bool *created,
+                                              eitem *eitem, item_attr *attrp,
+                                              const bool replace_if_exist,
+                                              bool *created, bool *replaced,
                                               eitem_result *trimmed,
                                               uint16_t vbucket);
 

@@ -794,8 +794,8 @@ default_map_elem_release(ENGINE_HANDLE* handle, const void *cookie,
 static ENGINE_ERROR_CODE
 default_map_elem_insert(ENGINE_HANDLE* handle, const void* cookie,
                         const void* key, const int nkey, eitem *eitem,
-                        const bool replace_if_exist, item_attr *attrp,
-                        bool *replaced, bool *created, uint16_t vbucket)
+                        item_attr *attrp, const bool replace_if_exist,
+                        bool *created, bool *replaced, uint16_t vbucket)
 {
     struct default_engine *engine = get_handle(handle);
     ENGINE_ERROR_CODE ret;
@@ -803,8 +803,8 @@ default_map_elem_insert(ENGINE_HANDLE* handle, const void* cookie,
 
     ACTION_BEFORE_WRITE(cookie, key, nkey);
     ret = map_elem_insert(key, nkey, (map_elem_item*)eitem,
-                          replace_if_exist, attrp,
-                          replaced, created, cookie);
+                          attrp, replace_if_exist,
+                          created, replaced, cookie);
     ACTION_AFTER_WRITE(cookie, engine, ret);
     return ret;
 }
@@ -935,9 +935,9 @@ default_btree_elem_release(ENGINE_HANDLE* handle, const void *cookie,
 static ENGINE_ERROR_CODE
 default_btree_elem_insert(ENGINE_HANDLE* handle, const void* cookie,
                           const void* key, const int nkey,
-                          eitem *eitem, const bool replace_if_exist,
-                          item_attr *attrp,
-                          bool *replaced, bool *created,
+                          eitem *eitem, item_attr *attrp,
+                          const bool replace_if_exist,
+                          bool *created, bool *replaced,
                           eitem_result *trimmed, uint16_t vbucket)
 {
     struct default_engine* engine = get_handle(handle);
@@ -947,7 +947,7 @@ default_btree_elem_insert(ENGINE_HANDLE* handle, const void* cookie,
     ACTION_BEFORE_WRITE(cookie, key, nkey);
     if (trimmed == NULL) {
         ret = btree_elem_insert(key, nkey, (btree_elem_item *)eitem,
-                                replace_if_exist, attrp, replaced, created,
+                                attrp, replace_if_exist, created, replaced,
                                 NULL, NULL, NULL, cookie);
     } else {
         /* We use a separate trimmed_elems variable to fix compile warning of
@@ -955,7 +955,7 @@ default_btree_elem_insert(ENGINE_HANDLE* handle, const void* cookie,
          */
         btree_elem_item *trimmed_elems=NULL;
         ret = btree_elem_insert(key, nkey, (btree_elem_item *)eitem,
-                                replace_if_exist, attrp, replaced, created,
+                                attrp, replace_if_exist, created, replaced,
                                 &trimmed_elems, &trimmed->count, &trimmed->flags,
                                 cookie);
         trimmed->elems = trimmed_elems;

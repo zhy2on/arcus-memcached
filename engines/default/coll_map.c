@@ -498,8 +498,8 @@ void map_elem_release(map_elem_item **elem_array, const int elem_count)
 }
 
 ENGINE_ERROR_CODE map_elem_insert(const char *key, const uint32_t nkey,
-                                  map_elem_item *elem, const bool replace_if_exist,
-                                  item_attr *attrp, bool *replaced, bool *created,
+                                  map_elem_item *elem, item_attr *attrp,
+                                  const bool replace_if_exist, bool *created, bool *replaced,
                                   const void *cookie)
 {
     hash_item *it = NULL;

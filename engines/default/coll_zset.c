@@ -434,9 +434,9 @@ void zset_elem_free(zset_elem_item *elem)
 }
 
 ENGINE_ERROR_CODE zset_elem_insert(const char *key, const uint32_t nkey,
-                                   zset_elem_item *elem, const bool replace_if_exist,
-                                   ENGINE_UPDATE_COND cond, item_attr *attrp,
-                                   bool *replaced, bool *created, const void *cookie)
+                                   zset_elem_item *elem, item_attr *attrp,
+                                   const bool replace_if_exist, ENGINE_UPDATE_COND cond,
+                                   bool *created, bool *replaced, const void *cookie)
 {
     hash_item *it = NULL;
     ENGINE_ERROR_CODE ret;

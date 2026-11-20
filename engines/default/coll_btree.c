@@ -1525,8 +1525,8 @@ void btree_elem_release(btree_elem_item **elem_array, const int elem_count)
 }
 
 ENGINE_ERROR_CODE btree_elem_insert(const char *key, const uint32_t nkey,
-                                    btree_elem_item *elem, const bool replace_if_exist, item_attr *attrp,
-                                    bool *replaced, bool *created, btree_elem_item **trimmed_elems,
+                                    btree_elem_item *elem, item_attr *attrp, const bool replace_if_exist,
+                                    bool *created, bool *replaced, btree_elem_item **trimmed_elems,
                                     uint32_t *trimmed_count, uint32_t *trimmed_flags, const void *cookie)
 {
     hash_item *it = NULL;

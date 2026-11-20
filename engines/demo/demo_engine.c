@@ -471,8 +471,8 @@ Demo_map_elem_release(ENGINE_HANDLE* handle, const void *cookie,
 static ENGINE_ERROR_CODE
 Demo_map_elem_insert(ENGINE_HANDLE* handle, const void* cookie,
                         const void* key, const int nkey, eitem *eitem,
-                        const bool replace_if_exist, item_attr *attrp,
-                        bool *replaced, bool *created, uint16_t vbucket)
+                        item_attr *attrp, const bool replace_if_exist,
+                        bool *created, bool *replaced, uint16_t vbucket)
 {
     return ENGINE_ENOTSUP;
 }
@@ -550,9 +550,9 @@ Demo_btree_elem_release(ENGINE_HANDLE* handle, const void *cookie,
 static ENGINE_ERROR_CODE
 Demo_btree_elem_insert(ENGINE_HANDLE* handle, const void* cookie,
                           const void* key, const int nkey,
-                          eitem *eitem, const bool replace_if_exist,
-                          item_attr *attrp,
-                          bool *replaced, bool *created,
+                          eitem *eitem, item_attr *attrp,
+                          const bool replace_if_exist,
+                          bool *created, bool *replaced,
                           eitem_result *trimmed, uint16_t vbucket)
 {
     return ENGINE_ENOTSUP;

@@ -1936,8 +1936,8 @@ static void process_mop_insert_complete(conn *c)
         bool replaced;
         bool replace_if_exist = (c->coll_op == OPERATION_MOP_UPSERT ? true : false);
         ret = mc_engine.v1->map_elem_insert(mc_engine.v0, c, c->coll_key, c->coll_nkey,
-                                            c->coll_eitem, replace_if_exist, c->coll_attrp,
-                                            &replaced, &created, 0);
+                                            c->coll_eitem, c->coll_attrp, replace_if_exist,
+                                            &created, &replaced, 0);
         CONN_CHECK_AND_SET_EWOULDBLOCK(ret, c);
         if (settings.detail_enabled) {
             stats_prefix_record_mop_insert(c->coll_key, c->coll_nkey, (ret==ENGINE_SUCCESS));
@@ -2341,8 +2341,8 @@ static void process_bop_insert_complete(conn *c)
         ENGINE_ERROR_CODE ret;
 
         ret = mc_engine.v1->btree_elem_insert(mc_engine.v0, c, c->coll_key, c->coll_nkey,
-                                              c->coll_eitem, replace_if_exist,
-                                              c->coll_attrp, &replaced, &created,
+                                              c->coll_eitem, c->coll_attrp,
+                                              replace_if_exist, &created, &replaced,
                                               (c->coll_getrim ? &trim_result : NULL), 0);
         CONN_CHECK_AND_SET_EWOULDBLOCK(ret, c);
         if (settings.detail_enabled) {
@@ -5553,8 +5553,8 @@ static void process_bin_bop_insert_complete(conn *c)
 
     ENGINE_ERROR_CODE ret;
     ret = mc_engine.v1->btree_elem_insert(mc_engine.v0, c, c->coll_key, c->coll_nkey,
-                                          c->coll_eitem, replace_if_exist,
-                                          c->coll_attrp, &replaced, &created, NULL,
+                                          c->coll_eitem, c->coll_attrp,
+                                          replace_if_exist, &created, &replaced, NULL,
                                           c->binary_header.request.vbucket);
     CONN_CHECK_AND_SET_EWOULDBLOCK(ret, c);
     if (settings.detail_enabled) {
